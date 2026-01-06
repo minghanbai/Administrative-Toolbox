@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>活動排位大師 (Builder)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; }
+        
+        #floorCanvas { background-color: #f8fafc; cursor: grab; overflow: hidden; }
+        #floorCanvas:active { cursor: grabbing; }
+        #transformLayer {
+            transform-origin: 0 0; position: absolute; top: 0; left: 0;
+            background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+            background-size: 40px 40px; width: 10000px; height: 10000px;
+        }
+
+        .draggable-item { position: absolute; user-select: none; transition: box-shadow 0.2s; }
+        .draggable-item:hover { z-index: 50; }
+        
+        /* Table Styles - Shared */
+        .table-node {
+            background: white; border: 2px solid #cbd5e1;
+            display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth transition between modes */
+        }
+        .table-node.drag-over { border-color: #3b82f6; background-color: #eff6ff; }
+
+        /* Mode: Assign (Large Rect) */
+        .table-node.mode-assign {
+            border-radius: 1rem;
+        }
+
+        /* Mode: Layout (Small Circle) */
+        .table-node.mode-layout {
+            border-radius: 50%;
+            border-color: #f97316; /* Orange border like output */
+            background-color: #fff7ed;
+            align-items: center; justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .table-node.mode-layout:hover {
+            transform: scale(1.05);
+            border-color: #ea580c;
+        }
+
+        /* Objects */
+        .obj-stage {
+            background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;
+            font-weight: bold; border-radius: 4px; opacity: 0.9; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .obj-main-table {
+            border-radius: 50%; background: #fee2e2; border: 3px solid #ef4444;
+            display: flex; align-items: center; justify-content: center; font-weight: bold; color: #b91c1c;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .obj-label {
+            background: #e2e8f0; border: 1px solid #94a3b8; color: #475569; padding: 5px 15px;
+            border-radius: 999px; font-weight: bold; display: flex; align-items: center; justify-content: center;
+        }
+
+        .guest-chip { cursor: grab; transition: all 0.2s; user-select: none; }
+        .guest-chip:active { cursor: grabbing; transform: scale(1.05); opacity: 0.8; }
+        .guest-chip.dragging { opacity: 0.5; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        #modalOverlay.hidden { display: none; }
+
+        /* Selection & Marquee */
+        .selected-obj { outline: 2px solid #3b82f6; outline-offset: 2px; z-index: 60 !important; }
+        #selectionMarquee { position: absolute; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.2); display: none; z-index: 9999; pointer-events: none; }
+    </style>
+</head>
+<body class="h-screen flex flex-col bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 h-14 flex items-center justify-between px-4 shadow-sm z-20 flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-gray-800 leading-tight">活動排位大師</h1>
+                <p class="text-[10px] text-gray-400" id="saveStatus">Ready</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-2">
+            <!-- History Controls -->
+            <div class="bg-gray-100 p-1 rounded-lg border border-gray-200 flex gap-1 mr-2">
+                <button onclick="undo()" id="btn-undo" class="px-3 py-1 text-xs font-bold rounded text-gray-400 cursor-not-allowed transition" disabled title="復原 (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                <button onclick="redo()" id="btn-redo" class="px-3 py-1 text-xs font-bold rounded text-gray-400 cursor-not-allowed transition" disabled title="重做 (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+            </div>
+
+            <!-- Tool Toggle -->
+            <div class="bg-gray-100 p-1 rounded-lg border border-gray-200 flex gap-1 mr-2">
+                <button onclick="setTool('select')" id="btn-tool-select" class="px-3 py-1 text-xs font-bold rounded shadow bg-white text-blue-600 transition" title="框選模式"><i class="fa-solid fa-vector-square"></i></button>
+                <button onclick="setTool('pan')" id="btn-tool-pan" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-200 transition" title="拖曳畫布"><i class="fa-solid fa-hand"></i></button>
+            </div>
+
+            <!-- View Toggle -->
+            <div class="bg-gray-100 p-1 rounded-lg border border-gray-200 flex gap-1 mr-2">
+                <button onclick="setViewMode('assign')" id="btn-view-assign" class="px-3 py-1 text-xs font-bold rounded shadow bg-white text-blue-600 transition">
+                    <i class="fa-solid fa-users-rectangle"></i> 排位 (大)
+                </button>
+                <button onclick="setViewMode('layout')" id="btn-view-layout" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-200 transition">
+                    <i class="fa-solid fa-circle-nodes"></i> 佈置 (小)
+                </button>
+                <button onclick="toggleSpread()" id="btn-spread" class="ml-2 px-3 py-1 text-xs font-bold rounded bg-purple-100 text-purple-700 hover:bg-purple-200 transition hidden" title="自動將重疊的座位推開，不影響實際佈置位置">
+                    <i class="fa-solid fa-arrows-left-right-to-line"></i> 分散
+                </button>
+            </div>
+
+            <div class="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200 mr-2">
+                <button onclick="zoomOut()" class="w-8 h-8 hover:bg-white rounded text-gray-600"><i class="fa-solid fa-minus"></i></button>
+                <span id="zoomLevelDisplay" class="text-xs font-mono w-10 text-center text-gray-500">100%</span>
+                <button onclick="zoomIn()" class="w-8 h-8 hover:bg-white rounded text-gray-600"><i class="fa-solid fa-plus"></i></button>
+                <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
+                <button onclick="autoFitZoom()" class="px-2 h-8 hover:bg-white rounded text-gray-600 text-xs font-bold"><i class="fa-solid fa-expand"></i></button>
+            </div>
+
+            <button onclick="resetData()" class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded text-sm transition" title="清空"><i class="fa-solid fa-trash-can"></i></button>
+            <div class="h-6 w-[1px] bg-gray-300 mx-1"></div>
+            <button onclick="exportExcel()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button onclick="exportWebPackage()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-globe"></i> 打包網頁</button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 flex-shrink-0">
+            <div class="flex border-b border-gray-200 text-sm font-bold text-gray-500">
+                <button onclick="switchTab('tab-guests')" id="btn-tab-guests" class="flex-1 py-3 text-blue-600 border-b-2 border-blue-600 bg-blue-50">人員名單</button>
+                <button onclick="switchTab('tab-layout')" id="btn-tab-layout" class="flex-1 py-3 hover:text-gray-700 hover:bg-gray-50">場地佈置</button>
+            </div>
+
+            <div id="tab-guests" class="flex-1 flex flex-col overflow-hidden">
+                <div class="p-3 border-b bg-gray-50 space-y-2">
+                    <div class="relative">
+                        <input type="text" id="defaultUnitInput" placeholder="預設單位 (選填)" class="w-full border rounded p-1.5 text-sm pl-7">
+                        <i class="fa-solid fa-building absolute left-2 top-2 text-gray-400 text-xs"></i>
+                    </div>
+                    <div class="flex gap-2 text-[10px] bg-white p-1 rounded border text-gray-600">
+                        <span class="font-bold pl-1 text-gray-400">輸入模式:</span>
+                        <label class="flex items-center gap-1 cursor-pointer hover:text-blue-600"><input type="radio" name="inputMode" value="name" checked> 姓名</label>
+                        <label class="flex items-center gap-1 cursor-pointer hover:text-blue-600"><input type="radio" name="inputMode" value="unit"> 單位</label>
+                    </div>
+                    <textarea id="guestInput" rows="3" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="輸入名單... (支援: 財務部 5)"></textarea>
+                    <button onclick="parseGuests()" class="w-full bg-gray-800 text-white text-sm py-1.5 rounded hover:bg-black transition">加入名單</button>
+                    <div class="flex justify-between text-xs text-gray-500 pt-1">
+                        <span>總計: <b id="totalCount">0</b></span>
+                        <span class="text-green-600">已排: <b id="seatedCount">0</b></span>
+                        <span class="text-red-600">未排: <b id="unseatedCount">0</b></span>
+                    </div>
+                </div>
+                <div class="bg-gray-100 p-1 text-xs text-center font-bold text-gray-500 shadow-inner">未入席清單</div>
+                <div id="unseatedList" class="flex-1 overflow-y-auto p-2 space-y-1 bg-gray-50"></div>
+            </div>
+
+            <div id="tab-layout" class="hidden flex-1 flex flex-col overflow-y-auto p-4 space-y-4 bg-gray-50">
+                <div class="bg-white p-3 rounded-lg border shadow-sm">
+                    <h3 class="font-bold text-gray-700 text-sm mb-2"><i class="fa-solid fa-table-cells"></i> 快速生成</h3>
+                    <div class="grid grid-cols-3 gap-2 text-xs mb-2">
+                        <input type="number" id="colsInput" value="4" class="border rounded p-1" title="橫排">
+                        <input type="number" id="rowsInput" value="3" class="border rounded p-1" title="直列">
+                        <input type="number" id="gapInput" value="120" class="border rounded p-1" title="間距">
+                    </div>
+                    <button onclick="generateGridTables()" class="w-full bg-blue-100 text-blue-700 text-sm py-1.5 rounded hover:bg-blue-200">生成矩陣 (適合佈置模式)</button>
+                </div>
+                <div class="bg-white p-3 rounded-lg border shadow-sm">
+                    <h3 class="font-bold text-gray-700 text-sm mb-2"><i class="fa-solid fa-shapes"></i> 加入物件</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="addMapObject('table')" class="flex flex-col items-center p-2 border rounded hover:bg-gray-50 transition"><div class="w-8 h-8 rounded-full border-2 border-orange-400 bg-orange-50 mb-1"></div><span class="text-xs">圓桌</span></button>
+                        <button onclick="addMapObject('main-table')" class="flex flex-col items-center p-2 border rounded hover:bg-gray-50 transition"><div class="w-8 h-8 rounded-full border-2 border-red-400 bg-red-100 mb-1"></div><span class="text-xs">主桌</span></button>
+                        <button onclick="addMapObject('stage')" class="flex flex-col items-center p-2 border rounded hover:bg-gray-50 transition"><div class="w-12 h-6 bg-blue-500 rounded mb-1"></div><span class="text-xs">舞台</span></button>
+                        <button onclick="addMapObject('label')" class="flex flex-col items-center p-2 border rounded hover:bg-gray-50 transition"><div class="w-12 h-6 bg-gray-200 border border-gray-400 rounded-full flex items-center justify-center text-[8px] mb-1">入口</div><span class="text-xs">標示</span></button>
+                    </div>
+                </div>
+                <div class="text-xs text-gray-400 px-1">* 建議切換至「佈置 (小)」模式來排列桌子，以獲得最準確的輸出效果。</div>
+            </div>
+        </aside>
+
+        <main class="flex-1 relative bg-gray-200 overflow-hidden">
+            <div id="floorCanvas" class="w-full h-full relative"><div id="transformLayer"></div></div>
+            <div id="selectionMarquee"></div>
+            <div class="absolute top-4 right-4 flex flex-col gap-2">
+                <div class="bg-white/90 backdrop-blur p-2 rounded shadow-lg border text-xs">
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" id="lockLayout" onchange="toggleLock()" class="accent-blue-600">
+                        <span id="lockLabel">🔓 解鎖編輯 (可移動)</span>
+                    </label>
+                </div>
+                <div class="bg-white/90 backdrop-blur p-2 rounded shadow-lg border text-xs">
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" id="snapGrid" onchange="toggleSnap()" class="accent-blue-600">
+                        <span>📏 吸附格點</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Alignment Toolbar (Floating) -->
+            <div id="alignToolbar" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur shadow-xl border border-gray-300 rounded-full px-4 py-2 flex gap-3 z-50 hidden transition-all">
+                <div class="flex gap-1 border-r pr-3 border-gray-300">
+                    <button onclick="alignSelected('left')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="靠左對齊"><i class="fa-solid fa-align-left"></i></button>
+                    <button onclick="alignSelected('center-h')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="水平置中"><i class="fa-solid fa-align-center"></i></button>
+                    <button onclick="alignSelected('right')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="靠右對齊"><i class="fa-solid fa-align-right"></i></button>
+                </div>
+                <div class="flex gap-1 border-r pr-3 border-gray-300">
+                    <button onclick="alignSelected('top')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="靠上對齊"><i class="fa-solid fa-align-justify fa-rotate-90"></i></button>
+                    <button onclick="alignSelected('center-v')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="垂直置中"><i class="fa-solid fa-align-center fa-rotate-90"></i></button>
+                    <button onclick="alignSelected('bottom')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="靠下對齊"><i class="fa-solid fa-align-left fa-rotate-90"></i></button>
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="distributeSelected('h')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="水平分佈 (等間距)"><i class="fa-solid fa-ellipsis"></i></button>
+                    <button onclick="distributeSelected('v')" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="垂直分佈 (等間距)"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                </div>
+                <div class="flex gap-1 border-l pl-3 border-gray-300">
+                    <button onclick="arrangeSelectedGrid()" class="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded" title="矩陣排列 (Grid)"><i class="fa-solid fa-border-all"></i></button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="modalOverlay" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-lg p-5 w-80 shadow-2xl transform transition-all">
+            <h3 class="font-bold text-lg mb-3">修改名稱</h3>
+            <input type="text" id="modalInput" class="w-full border p-2 rounded mb-4 focus:ring-2 focus:ring-blue-500 outline-none">
+            <div class="flex justify-end gap-2">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded">取消</button>
+                <button onclick="saveModal()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let mapObjects = []; 
+        let guests = [];
+        let appState = { scale: 1, panX: 0, panY: 0, locked: false, viewMode: 'assign', isSpread: false, toolMode: 'select', selectedIds: [], snapToGrid: false }; // 'assign' or 'layout'
+        let editingObjectId = null;
+        let historyStack = [];
+        let redoStack = [];
+
+        // Constants
+        const SIZES = {
+            assign: { w: 180, h: 180 }, // Large box
+            layout: { w: 80, h: 80 }    // Small circle
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFromLocal();
+            setupCanvasEvents();
+            
+            // 修正：在此處為側邊欄加上監聽器
+            const sidebar = document.getElementById('unseatedList');
+            sidebar.addEventListener('dragover', e => e.preventDefault());
+            sidebar.addEventListener('drop', e => dropGuest(e, null));
+
+            renderAll();
+            updateStats();
+
+            // Keyboard Shortcuts for Undo/Redo
+            window.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                    e.preventDefault();
+                    if (e.shiftKey) redo();
+                    else undo();
+                } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+                    e.preventDefault();
+                    redo();
+                }
+            });
+        });
+
+        // --- History System ---
+        function recordState() {
+            // Call this BEFORE making changes to mapObjects or guests
+            const state = JSON.stringify({ mapObjects, guests });
+            historyStack.push(state);
+            if (historyStack.length > 50) historyStack.shift(); // Limit history
+            redoStack = []; // Clear redo on new action
+            updateHistoryButtons();
+        }
+
+        function undo() {
+            if (historyStack.length === 0) return;
+            const currentState = JSON.stringify({ mapObjects, guests });
+            redoStack.push(currentState);
+            
+            const prevState = JSON.parse(historyStack.pop());
+            mapObjects = prevState.mapObjects;
+            guests = prevState.guests;
+            
+            renderAll(); updateStats(); saveToLocal(); updateHistoryButtons();
+        }
+
+        function redo() {
+            if (redoStack.length === 0) return;
+            const currentState = JSON.stringify({ mapObjects, guests });
+            historyStack.push(currentState);
+            
+            const nextState = JSON.parse(redoStack.pop());
+            mapObjects = nextState.mapObjects;
+            guests = nextState.guests;
+            
+            renderAll(); updateStats(); saveToLocal(); updateHistoryButtons();
+        }
+
+        function updateHistoryButtons() {
+            const btnUndo = document.getElementById('btn-undo');
+            const btnRedo = document.getElementById('btn-redo');
+            
+            if (historyStack.length > 0) {
+                btnUndo.disabled = false;
+                btnUndo.classList.remove('text-gray-400', 'cursor-not-allowed');
+                btnUndo.classList.add('text-gray-700', 'hover:bg-gray-200');
+            } else {
+                btnUndo.disabled = true;
+                btnUndo.classList.add('text-gray-400', 'cursor-not-allowed');
+                btnUndo.classList.remove('text-gray-700', 'hover:bg-gray-200');
+            }
+
+            if (redoStack.length > 0) {
+                btnRedo.disabled = false;
+                btnRedo.classList.remove('text-gray-400', 'cursor-not-allowed');
+                btnRedo.classList.add('text-gray-700', 'hover:bg-gray-200');
+            } else {
+                btnRedo.disabled = true;
+                btnRedo.classList.add('text-gray-400', 'cursor-not-allowed');
+                btnRedo.classList.remove('text-gray-700', 'hover:bg-gray-200');
+            }
+        }
+
+        // --- Tool Mode ---
+        function setTool(mode) {
+            appState.toolMode = mode;
+            const btnSelect = document.getElementById('btn-tool-select');
+            const btnPan = document.getElementById('btn-tool-pan');
+            if (mode === 'select') {
+                btnSelect.classList.add('shadow', 'bg-white', 'text-blue-600'); btnSelect.classList.remove('text-gray-500', 'hover:bg-gray-200');
+                btnPan.classList.remove('shadow', 'bg-white', 'text-blue-600'); btnPan.classList.add('text-gray-500', 'hover:bg-gray-200');
+            } else {
+                btnPan.classList.add('shadow', 'bg-white', 'text-blue-600'); btnPan.classList.remove('text-gray-500', 'hover:bg-gray-200');
+                btnSelect.classList.remove('shadow', 'bg-white', 'text-blue-600'); btnSelect.classList.add('text-gray-500', 'hover:bg-gray-200');
+            }
+        }
+
+        // --- View Mode Logic ---
+        function setViewMode(mode) {
+            // 如果切換回佈置模式且目前處於分散狀態，強制復原位置
+            if (mode === 'layout' && appState.isSpread) {
+                toggleSpread();
+            }
+
+            // 佈置模式預設開啟吸附格點
+            if (mode === 'layout') {
+                appState.snapToGrid = true;
+                const cb = document.getElementById('snapGrid'); if(cb) cb.checked = true;
+            }
+
+            appState.viewMode = mode;
+            
+            // Update Buttons
+            const btnAssign = document.getElementById('btn-view-assign');
+            const btnLayout = document.getElementById('btn-view-layout');
+            
+            if(mode === 'assign') {
+                btnAssign.classList.add('shadow', 'bg-white', 'text-blue-600');
+                btnAssign.classList.remove('text-gray-500', 'hover:bg-gray-200');
+                btnLayout.classList.remove('shadow', 'bg-white', 'text-blue-600');
+                btnLayout.classList.add('text-gray-500', 'hover:bg-gray-200');
+            } else {
+                btnLayout.classList.add('shadow', 'bg-white', 'text-blue-600');
+                btnLayout.classList.remove('text-gray-500', 'hover:bg-gray-200');
+                btnAssign.classList.remove('shadow', 'bg-white', 'text-blue-600');
+                btnAssign.classList.add('text-gray-500', 'hover:bg-gray-200');
+            }
+            
+            // 控制分散按鈕顯示 (只在排位模式顯示)
+            const btnSpread = document.getElementById('btn-spread');
+            if (mode === 'assign') btnSpread.classList.remove('hidden');
+            else btnSpread.classList.add('hidden');
+
+            // Transform Objects dimensions in data model to reflect visual size
+            // This ensures drag and drop "center" calculations are correct
+            mapObjects.forEach(obj => {
+                if (obj.type === 'table') {
+                    // Update width/height based on mode
+                    if(mode === 'layout') {
+                        obj.width = SIZES.layout.w;
+                        obj.height = SIZES.layout.h;
+                    } else {
+                        obj.width = SIZES.assign.w;
+                        obj.height = SIZES.assign.h; // Min height, expands in CSS
+                    }
+                }
+            });
+
+            renderAll();
+            saveToLocal();
+        }
+
+        function toggleSpread() {
+            recordState(); // Record before spreading/restoring
+            const btn = document.getElementById('btn-spread');
+            if (appState.isSpread) {
+                // 復原 (Restore)
+                mapObjects.forEach(o => {
+                    if (o.ox !== undefined) {
+                        o.x = o.ox;
+                        o.y = o.oy;
+                        delete o.ox;
+                        delete o.oy;
+                    }
+                });
+                appState.isSpread = false;
+                btn.classList.remove('bg-purple-600', 'text-white');
+                btn.classList.add('bg-purple-100', 'text-purple-700');
+                btn.innerHTML = '<i class="fa-solid fa-arrows-left-right-to-line"></i> 分散';
+            } else {
+                // 分散 (Spread)
+                // 備份原始座標
+                mapObjects.forEach(o => {
+                    o.ox = o.x;
+                    o.oy = o.y;
+                });
+                resolveOverlaps();
+                appState.isSpread = true;
+                btn.classList.remove('bg-purple-100', 'text-purple-700');
+                btn.classList.add('bg-purple-600', 'text-white');
+                btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 復原';
+            }
+            renderAll();
+            saveToLocal();
+        }
+
+        function resolveOverlaps() {
+            const padding = 20;
+            // 簡單的迭代式碰撞處理
+            for(let k=0; k<50; k++) {
+                let adjusted = false;
+                for(let i=0; i<mapObjects.length; i++) {
+                    for(let j=i+1; j<mapObjects.length; j++) {
+                        let a = mapObjects[i], b = mapObjects[j];
+                        let acx = a.x + a.width/2, acy = a.y + a.height/2;
+                        let bcx = b.x + b.width/2, bcy = b.y + b.height/2;
+                        let dx = acx - bcx, dy = acy - bcy;
+                        let minW = (a.width + b.width)/2 + padding;
+                        let minH = (a.height + b.height)/2 + padding;
+                        
+                        if (Math.abs(dx) < minW && Math.abs(dy) < minH) {
+                            adjusted = true;
+                            let penX = minW - Math.abs(dx), penY = minH - Math.abs(dy);
+                            if (penX < penY) {
+                                let sign = dx > 0 ? 1 : -1; if(dx===0) sign = Math.random()>0.5?1:-1;
+                                a.x += sign * penX * 0.5; b.x -= sign * penX * 0.5;
+                            } else {
+                                let sign = dy > 0 ? 1 : -1; if(dy===0) sign = Math.random()>0.5?1:-1;
+                                a.y += sign * penY * 0.5; b.y -= sign * penY * 0.5;
+                            }
+                        }
+                    }
+                }
+                if(!adjusted) break;
+            }
+        }
+
+        function saveToLocal() {
+            localStorage.setItem('seatingMasterData', JSON.stringify({ mapObjects, guests, appState }));
+            const s = document.getElementById('saveStatus');
+            s.innerText = "已儲存 " + new Date().toLocaleTimeString();
+            s.classList.add('text-green-600');
+            setTimeout(() => s.classList.remove('text-green-600'), 1000);
+        }
+
+        function loadFromLocal() {
+            const raw = localStorage.getItem('seatingMasterData');
+            if (raw) {
+                try {
+                    const data = JSON.parse(raw);
+                    mapObjects = data.mapObjects || [];
+                    guests = data.guests || [];
+                    if(data.appState) {
+                        appState.scale = data.appState.scale || 1;
+                        appState.panX = data.appState.panX || 0;
+                        appState.panY = data.appState.panY || 0;
+                        if(data.appState.viewMode) setViewMode(data.appState.viewMode);
+                        if(data.appState.toolMode) setTool(data.appState.toolMode);
+                        if(data.appState.snapToGrid !== undefined) {
+                            appState.snapToGrid = data.appState.snapToGrid;
+                            const cb = document.getElementById('snapGrid'); if(cb) cb.checked = appState.snapToGrid;
+                        }
+                        // 恢復按鈕狀態
+                        if(appState.isSpread) {
+                            const btn = document.getElementById('btn-spread');
+                            btn.classList.remove('bg-purple-100', 'text-purple-700');
+                            btn.classList.add('bg-purple-600', 'text-white');
+                            btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 復原';
+                        }
+                    }
+                } catch(e) { console.error(e); }
+            } else {
+                addMapObject('stage', 400, 50);
+                generateGridTables();
+            }
+        }
+
+        function resetData() {
+            if(confirm('清空所有資料？')) {
+                localStorage.removeItem('seatingMasterData');
+                location.reload();
+            }
+        }
+
+        // --- Core Logic ---
+        function genId() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); }
+
+        function addMapObject(type, x, y, isBatch = false) {
+            if(!isBatch) recordState();
+            if (x === undefined) {
+                const cvs = document.getElementById('floorCanvas');
+                x = (-appState.panX + cvs.clientWidth/2) / appState.scale;
+                y = (-appState.panY + cvs.clientHeight/2) / appState.scale;
+            }
+            const id = genId();
+            let newObj = { id, type, x, y, width: 180, height: 180, name: '' };
+
+            if (type === 'table') {
+                newObj.name = `第 ${mapObjects.filter(o=>o.type==='table').length + 1} 桌`;
+                // Use size based on current mode
+                const size = SIZES[appState.viewMode];
+                newObj.width = size.w;
+                newObj.height = size.h;
+            } else if (type === 'main-table') {
+                newObj.name = '主桌'; newObj.width = 220; newObj.height = 220;
+            } else if (type === 'stage') {
+                newObj.name = '舞 台 STAGE'; newObj.width = 400; newObj.height = 60;
+            } else if (type === 'label') {
+                newObj.name = '入口處'; newObj.width = 120; newObj.height = 40;
+            }
+            mapObjects.push(newObj);
+            if(!isBatch) {
+                renderAll();
+                saveToLocal();
+            }
+            return newObj;
+        }
+
+        function generateGridTables() {
+            recordState();
+            const cols = parseInt(document.getElementById('colsInput').value) || 4;
+            const rows = parseInt(document.getElementById('rowsInput').value) || 3;
+            const gap = parseInt(document.getElementById('gapInput').value) || 120;
+            
+            let startY = 150;
+            mapObjects.forEach(o => { if(o.y + o.height > startY) startY = o.y + o.height + 50; });
+            let count = mapObjects.filter(o => o.type === 'table').length + 1;
+
+            // Default to Layout mode when generating for better packing
+            setViewMode('layout');
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    let obj = addMapObject('table', 50 + c * gap, startY + r * gap, true);
+                    obj.name = `第 ${count++} 桌`;
+                }
+            }
+            renderAll();
+            autoFitZoom();
+            saveToLocal();
+        }
+
+        function deleteObject(id) {
+            if(!confirm('確定刪除？')) return;
+            recordState();
+            guests.forEach(g => { if(g.tableId === id) g.tableId = null; });
+            
+            // If deleting a selected object, delete all selected
+            const idsToDelete = (appState.selectedIds.includes(id)) ? appState.selectedIds : [id];
+            mapObjects = mapObjects.filter(o => !idsToDelete.includes(o.id));
+            appState.selectedIds = [];
+            updateSelectionVisuals();
+            renderAll(); updateStats();
+        }
+
+        // --- Rendering ---
+        function renderAll() { renderUnseatedList(); renderMap(); updateSelectionVisuals(); }
+
+        function renderMap() {
+            const container = document.getElementById('transformLayer');
+            container.innerHTML = '';
+
+            mapObjects.forEach(obj => {
+                const el = document.createElement('div');
+                el.className = 'draggable-item';
+                el.style.left = obj.x + 'px';
+                el.style.top = obj.y + 'px';
+                el.style.width = obj.width + 'px';
+                el.style.height = obj.height + 'px';
+                el.id = obj.id;
+
+                if (!appState.locked) { addDragLogic(el, obj); el.style.cursor = 'move'; } 
+                else { el.style.cursor = 'default'; }
+
+                if (obj.type === 'table' || obj.type === 'main-table') {
+                    const isMain = obj.type === 'main-table';
+                    const isLayout = appState.viewMode === 'layout';
+                    const seatedCount = guests.filter(g => g.tableId === obj.id).reduce((acc,g) => acc + (g.count||1), 0);
+
+                    // Class Handling
+                    el.className += isMain ? ' obj-main-table flex-col' : ` table-node mode-${appState.viewMode}`;
+                    
+                    // Content
+                    if(isLayout && !isMain) {
+                        // Small Circle Content
+                        el.innerHTML = `
+                            <div class="flex flex-col items-center justify-center h-full pointer-events-none" onclick="openModal('${obj.id}')">
+                                <span class="font-bold text-gray-700 text-sm leading-none">${obj.name}</span>
+                                <span class="text-[10px] text-orange-600 font-bold bg-orange-100 px-1 rounded mt-1">${seatedCount}人</span>
+                            </div>
+                            ${!appState.locked ? `<button onclick="deleteObject('${obj.id}')" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] hover:scale-110 pointer-events-auto">×</button>`:''}
+                        `;
+                    } else {
+                        // Large Rect or Main Table Content
+                        const header = document.createElement('div');
+                        header.className = isMain ? 'mt-4 mb-2 text-center' : 'bg-gray-100 p-2 border-b border-gray-200 flex justify-between items-center cursor-pointer hover:bg-gray-200 transition group';
+                        
+                        if (isMain) {
+                            header.innerHTML = `<span class="text-xl cursor-pointer" onclick="openModal('${obj.id}')">${obj.name} <i class="fa-solid fa-pen text-xs opacity-50"></i></span>`;
+                            const del = document.createElement('button');
+                            del.className = 'absolute top-0 right-0 p-2 text-red-400 hover:text-red-600';
+                            if(!appState.locked) del.innerHTML = '<i class="fa-solid fa-times"></i>';
+                            del.onclick = (e) => { e.stopPropagation(); deleteObject(obj.id); };
+                            el.appendChild(del);
+                        } else {
+                            header.innerHTML = `
+                                <div class="flex items-center gap-1 overflow-hidden flex-1" onclick="openModal('${obj.id}')">
+                                    <i class="fa-solid fa-pen text-[10px] text-gray-400 group-hover:text-blue-500"></i>
+                                    <span class="font-bold text-gray-700 truncate">${obj.name}</span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <span class="bg-blue-100 text-blue-800 text-xs px-2 rounded-full">${seatedCount}</span>
+                                    ${!appState.locked ? `<button onclick="deleteObject('${obj.id}')" class="text-gray-300 hover:text-red-500 px-1"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                                </div>
+                            `;
+                        }
+                        el.appendChild(header);
+
+                        const guestBox = document.createElement('div');
+                        guestBox.className = 'flex-1 w-full overflow-y-auto p-1 space-y-1 ' + (isMain ? 'px-6 pb-6' : 'bg-white');
+                        guestBox.addEventListener('wheel', e => e.stopPropagation(), {passive:false});
+
+                        const tableGuests = guests.filter(g => g.tableId === obj.id);
+                        tableGuests.forEach(g => {
+                            guestBox.appendChild(createGuestElement(g, true));
+                        });
+                        el.appendChild(guestBox);
+                    }
+
+                    // Drop Events (Work in both modes, but logic easier in Assign mode)
+                    el.addEventListener('dragover', e => e.preventDefault());
+                    el.addEventListener('drop', e => dropGuest(e, obj.id));
+                    el.addEventListener('dragenter', () => el.classList.add('drag-over'));
+                    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+
+                } else {
+                    // Stage / Label
+                    el.className += (obj.type === 'stage' ? ' obj-stage' : ' obj-label');
+                    el.innerHTML = `<span onclick="openModal('${obj.id}')" class="cursor-pointer hover:underline decoration-dashed">${obj.name}</span>`;
+                    if (!appState.locked) {
+                        const del = document.createElement('div');
+                        del.className = 'absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs cursor-pointer shadow hover:scale-110 pointer-events-auto';
+                        del.innerHTML = '×';
+                        del.onclick = (e) => { e.stopPropagation(); deleteObject(obj.id); };
+                        el.appendChild(del);
+                    }
+                }
+                container.appendChild(el);
+            });
+        }
+
+        function updateSelectionVisuals() {
+            document.querySelectorAll('.draggable-item').forEach(el => el.classList.remove('selected-obj'));
+            appState.selectedIds.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) el.classList.add('selected-obj');
+            });
+            // Show/Hide Toolbar
+            const tb = document.getElementById('alignToolbar');
+            if(appState.selectedIds.length > 1) tb.classList.remove('hidden');
+            else tb.classList.add('hidden');
+        }
+
+        // --- Interaction Logic ---
+        function addDragLogic(el, obj) {
+            let isDragging = false;
+            let startX, startY;
+            let initialPos = {}; // Store initial positions for all selected objects
+            let preDragState = null; // Snapshot for undo
+
+            el.addEventListener('mousedown', e => {
+                if (e.target.closest('.guest-chip') || e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+                e.stopPropagation();
+
+                // Selection Logic
+                if (appState.toolMode === 'select') {
+                    if (e.shiftKey) {
+                        // Toggle/Add
+                        if (!appState.selectedIds.includes(obj.id)) appState.selectedIds.push(obj.id);
+                    } else {
+                        // If clicking an unselected item, clear others. If clicking a selected item, keep selection (for drag)
+                        if (!appState.selectedIds.includes(obj.id)) {
+                            appState.selectedIds = [obj.id];
+                        }
+                    }
+                    updateSelectionVisuals();
+                }
+
+                isDragging = true;
+                startX = e.clientX; startY = e.clientY;
+                
+                // Snapshot positions of ALL selected objects
+                appState.selectedIds.forEach(id => {
+                    const o = mapObjects.find(i => i.id === id);
+                    if(o) initialPos[id] = { x: o.x, y: o.y };
+                });
+                
+                preDragState = JSON.stringify({ mapObjects, guests }); // Capture state before move
+                el.style.zIndex = 100;
+            });
+
+            window.addEventListener('mousemove', e => {
+                if (!isDragging) return;
+                e.preventDefault();
+                let dx = (e.clientX - startX) / appState.scale;
+                let dy = (e.clientY - startY) / appState.scale;
+                
+                if (e.shiftKey) {
+                    if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+                    else dx = 0;
+                }
+
+                // Snap to Grid Logic (Based on the primary object being dragged)
+                if (appState.snapToGrid && initialPos[obj.id]) {
+                    const grid = 40; // Match CSS grid size
+                    
+                    // Calculate target center
+                    const currentX = initialPos[obj.id].x + dx;
+                    const currentY = initialPos[obj.id].y + dy;
+                    const centerX = currentX + obj.width / 2;
+                    const centerY = currentY + obj.height / 2;
+
+                    // Snap center to grid intersection
+                    const snappedCenterX = Math.round(centerX / grid) * grid;
+                    const snappedCenterY = Math.round(centerY / grid) * grid;
+                    
+                    // Convert back to top-left and recalculate dx/dy
+                    dx = (snappedCenterX - obj.width / 2) - initialPos[obj.id].x;
+                    dy = (snappedCenterY - obj.height / 2) - initialPos[obj.id].y;
+                }
+                
+                // Move ALL selected objects
+                appState.selectedIds.forEach(id => {
+                    const o = mapObjects.find(i => i.id === id);
+                    const elRef = document.getElementById(id);
+                    if (o && initialPos[id] && elRef) {
+                        o.x = initialPos[id].x + dx;
+                        o.y = initialPos[id].y + dy;
+                        elRef.style.left = o.x + 'px';
+                        elRef.style.top = o.y + 'px';
+                    }
+                });
+            });
+
+            window.addEventListener('mouseup', (e) => { 
+                if(isDragging) { 
+                    isDragging=false; 
+                    el.style.zIndex=''; 
+                    // Only record history if actually moved
+                    if (Math.abs(e.clientX - startX) > 2 || Math.abs(e.clientY - startY) > 2) {
+                        historyStack.push(preDragState); // Push the PRE-DRAG state to undo stack
+                        if (historyStack.length > 50) historyStack.shift();
+                        redoStack = [];
+                        updateHistoryButtons();
+                        saveToLocal(); 
+                    }
+                } 
+            });
+        }
+
+        // --- Guest Logic ---
+        function parseGuests() {
+            recordState();
+            const input = document.getElementById('guestInput').value;
+            const defUnit = document.getElementById('defaultUnitInput').value.trim() || '貴賓';
+            const mode = document.querySelector('input[name="inputMode"]:checked').value;
+            
+            if(!input.trim()) return;
+            const lines = input.split('\n');
+            
+            lines.forEach(line => {
+                line = line.trim().replace(/：/g, ':').replace(/，/g, ',');
+                if(!line) return;
+                if (line.includes(':')) {
+                    const [unit, names] = line.split(':');
+                    names.split(/,| /).forEach(n => { if(n.trim()) addGuest(unit.trim(), n.trim()); });
+                } else if (line.match(/^(.+?)\s+(\d+)$/)) {
+                    const match = line.match(/^(.+?)\s+(\d+)$/);
+                    const label = match[1];
+                    const num = parseInt(match[2]);
+                    if (mode === 'unit') addGuest(label, "保留席", num);
+                    else addGuest(defUnit, label, num);
+                } else {
+                    const parts = line.split(/\s+/);
+                    if (parts.length >= 2) addGuest(parts[0], parts.slice(1).join(' '));
+                    else if (parts.length === 1) {
+                        if (mode === 'unit') addGuest(parts[0], "保留席");
+                        else addGuest(defUnit, parts[0]);
+                    }
+                }
+            });
+            document.getElementById('guestInput').value = '';
+            renderAll(); updateStats(); saveToLocal();
+        }
+
+        function addGuest(unit, name, count=1) { guests.push({ id: genId(), unit, name, count, tableId: null }); }
+
+        function renderUnseatedList() {
+            const list = document.getElementById('unseatedList'); list.innerHTML = '';
+            guests.filter(g => !g.tableId).forEach(g => list.appendChild(createGuestElement(g, false)));
+        }
+
+        function createGuestElement(g, seated) {
+            const el = document.createElement('div');
+            el.className = `guest-chip bg-white border rounded p-1 text-xs flex justify-between items-center group relative ${seated ? 'border-blue-200' : 'border-gray-200'}`;
+            el.draggable = true;
+            el.innerHTML = `
+                <div class="pointer-events-none truncate pr-4">
+                    <span class="text-gray-400 text-[10px] mr-1">${g.unit}</span>
+                    <span class="font-bold text-gray-700">${g.name}</span>
+                    ${g.count > 1 ? `<span class="ml-1 bg-red-500 text-white rounded-full px-1 text-[9px]">x${g.count}</span>` : ''}
+                </div>
+                <button onclick="removeGuest('${g.id}')" class="absolute right-1 text-gray-300 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+            `;
+            el.addEventListener('dragstart', ev => { ev.dataTransfer.setData('gid', g.id); el.classList.add('dragging'); });
+            el.addEventListener('dragend', () => el.classList.remove('dragging'));
+            return el;
+        }
+
+        function dropGuest(ev, tableId) {
+            ev.preventDefault();
+            recordState();
+            document.querySelectorAll('.drag-over').forEach(e => e.classList.remove('drag-over'));
+            const gid = ev.dataTransfer.getData('gid');
+            const guest = guests.find(g => g.id === gid);
+            if (guest) { guest.tableId = tableId; renderAll(); updateStats(); saveToLocal(); }
+        }
+
+        function removeGuest(id) {
+            if(confirm('刪除?')) { recordState(); guests = guests.filter(g => g.id !== id); renderAll(); updateStats(); saveToLocal(); }
+        }
+
+        function updateStats() {
+            const total = guests.reduce((sum, g) => sum + (g.count || 1), 0);
+            const seated = guests.filter(g => g.tableId).reduce((sum, g) => sum + (g.count || 1), 0);
+            document.getElementById('totalCount').innerText = total;
+            document.getElementById('seatedCount').innerText = seated;
+            document.getElementById('unseatedCount').innerText = total - seated;
+        }
+
+        // --- Canvas Events ---
+        function setupCanvasEvents() {
+            const canvas = document.getElementById('floorCanvas');
+            const marquee = document.getElementById('selectionMarquee');
+            let isPanning = false, startX = 0, startY = 0;
+            let initialPanX = 0, initialPanY = 0;
+            let isSelecting = false, selStartX = 0, selStartY = 0;
+
+            canvas.addEventListener('mousedown', e => {
+                if(e.target === canvas || e.target.id === 'transformLayer') {
+                    if (appState.toolMode === 'pan' || (appState.toolMode === 'select' && e.button === 1)) {
+                        // Pan Mode
+                        isPanning = true; startX = e.clientX - appState.panX; startY = e.clientY - appState.panY;
+                        initialPanX = appState.panX; initialPanY = appState.panY;
+                        canvas.style.cursor = 'grabbing';
+                    } else if (appState.toolMode === 'select' && !appState.locked) {
+                        // Select Mode (Marquee)
+                        isSelecting = true;
+                        selStartX = e.clientX; selStartY = e.clientY;
+                        marquee.style.display = 'block';
+                        marquee.style.left = e.clientX + 'px'; marquee.style.top = e.clientY + 'px';
+                        marquee.style.width = '0px'; marquee.style.height = '0px';
+                        
+                        // Clear selection if not holding shift
+                        if(!e.shiftKey) {
+                            appState.selectedIds = [];
+                            updateSelectionVisuals();
+                        }
+                    }
+                }
+            });
+            window.addEventListener('mousemove', e => {
+                if(isPanning) { appState.panX = e.clientX - startX; appState.panY = e.clientY - startY; updateTransform(); }
+                if(isSelecting) {
+                    const currentX = e.clientX; const currentY = e.clientY;
+                    const left = Math.min(selStartX, currentX);
+                    const top = Math.min(selStartY, currentY);
+                    const width = Math.abs(currentX - selStartX);
+                    const height = Math.abs(currentY - selStartY);
+                    marquee.style.left = left + 'px'; marquee.style.top = top + 'px';
+                    marquee.style.width = width + 'px'; marquee.style.height = height + 'px';
+                }
+            });
+            window.addEventListener('mouseup', (e) => { 
+                if(isPanning) { 
+                    isPanning = false; canvas.style.cursor = 'grab'; 
+                    if(appState.panX !== initialPanX || appState.panY !== initialPanY) saveToLocal();
+                }
+                if(isSelecting) {
+                    isSelecting = false; marquee.style.display = 'none';
+                    finishSelection(selStartX, selStartY, e.clientX, e.clientY, e.shiftKey);
+                }
+            });
+            canvas.addEventListener('wheel', e => {
+                e.preventDefault(); const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                appState.scale = Math.max(0.1, Math.min(5, appState.scale * delta)); updateTransform();
+            });
+        }
+
+        function finishSelection(x1, y1, x2, y2, isShift) {
+            // Convert screen rect to world rect
+            const left = Math.min(x1, x2); const top = Math.min(y1, y2);
+            const right = Math.max(x1, x2); const bottom = Math.max(y1, y2);
+            
+            // If click without drag (tiny movement), clear selection
+            if (Math.abs(x2-x1) < 5 && Math.abs(y2-y1) < 5) {
+                if(!isShift) appState.selectedIds = [];
+                updateSelectionVisuals();
+                return;
+            }
+
+            mapObjects.forEach(o => {
+                // Object screen coordinates
+                const ox = o.x * appState.scale + appState.panX;
+                const oy = o.y * appState.scale + appState.panY;
+                const ow = o.width * appState.scale;
+                const oh = o.height * appState.scale;
+
+                // Check intersection
+                if (ox < right && ox + ow > left && oy < bottom && oy + oh > top) {
+                    if (!appState.selectedIds.includes(o.id)) appState.selectedIds.push(o.id);
+                }
+            });
+            updateSelectionVisuals();
+        }
+
+        // --- Alignment Functions ---
+        function alignSelected(type) {
+            if (appState.selectedIds.length < 2) return;
+            recordState();
+            const selected = mapObjects.filter(o => appState.selectedIds.includes(o.id));
+            
+            if (type === 'left') {
+                const minX = Math.min(...selected.map(o => o.x));
+                selected.forEach(o => o.x = minX);
+            } else if (type === 'center-h') {
+                const minX = Math.min(...selected.map(o => o.x));
+                const maxX = Math.max(...selected.map(o => o.x + o.width));
+                const center = (minX + maxX) / 2;
+                selected.forEach(o => o.x = center - o.width / 2);
+            } else if (type === 'right') {
+                const maxRight = Math.max(...selected.map(o => o.x + o.width));
+                selected.forEach(o => o.x = maxRight - o.width);
+            } else if (type === 'top') {
+                const minY = Math.min(...selected.map(o => o.y));
+                selected.forEach(o => o.y = minY);
+            } else if (type === 'center-v') {
+                const minY = Math.min(...selected.map(o => o.y));
+                const maxY = Math.max(...selected.map(o => o.y + o.height));
+                const center = (minY + maxY) / 2;
+                selected.forEach(o => o.y = center - o.height / 2);
+            } else if (type === 'bottom') {
+                const maxBottom = Math.max(...selected.map(o => o.y + o.height));
+                selected.forEach(o => o.y = maxBottom - o.height);
+            }
+            renderAll(); saveToLocal();
+        }
+
+        function distributeSelected(type) {
+            if (appState.selectedIds.length < 3) return;
+            recordState();
+            const selected = mapObjects.filter(o => appState.selectedIds.includes(o.id));
+            
+            if (type === 'h') {
+                selected.sort((a, b) => a.x - b.x);
+                const minX = selected[0].x;
+                const maxX = selected[selected.length - 1].x + selected[selected.length - 1].width;
+                const totalWidth = maxX - minX;
+                const sumObjectWidth = selected.reduce((sum, o) => sum + o.width, 0);
+                const gap = (totalWidth - sumObjectWidth) / (selected.length - 1);
+                
+                let currentX = minX;
+                selected.forEach(o => {
+                    o.x = currentX;
+                    currentX += o.width + gap;
+                });
+            } else if (type === 'v') {
+                selected.sort((a, b) => a.y - b.y);
+                const minY = selected[0].y;
+                const maxY = selected[selected.length - 1].y + selected[selected.length - 1].height;
+                const totalHeight = maxY - minY;
+                const sumObjectHeight = selected.reduce((sum, o) => sum + o.height, 0);
+                const gap = (totalHeight - sumObjectHeight) / (selected.length - 1);
+                
+                let currentY = minY;
+                selected.forEach(o => {
+                    o.y = currentY;
+                    currentY += o.height + gap;
+                });
+            }
+            renderAll(); saveToLocal();
+        }
+
+        function arrangeSelectedGrid() {
+            if (appState.selectedIds.length < 2) return;
+            recordState();
+            const selected = mapObjects.filter(o => appState.selectedIds.includes(o.id));
+            
+            // 1. Sort spatially to determine logical order
+            // Heuristic: Sort by Y first (grouping by row threshold), then by X.
+            const avgH = selected.reduce((s,o)=>s+o.height,0) / selected.length;
+            const threshold = avgH * 0.5;
+
+            selected.sort((a,b) => a.y - b.y);
+            
+            const rows = [];
+            let currentRow = [selected[0]];
+            let currentRowY = selected[0].y;
+
+            for(let i=1; i<selected.length; i++) {
+                const obj = selected[i];
+                if (Math.abs(obj.y - currentRowY) < threshold) {
+                    currentRow.push(obj);
+                } else {
+                    rows.push(currentRow);
+                    currentRow = [obj];
+                    currentRowY = obj.y;
+                }
+            }
+            rows.push(currentRow);
+            rows.forEach(r => r.sort((a,b) => a.x - b.x));
+            const sorted = rows.flat();
+
+            // 2. Prompt Settings
+            const defaultCols = Math.max(...rows.map(r => r.length));
+            const colsStr = prompt(`排列成幾列 (Columns)?\n(選取了 ${selected.length} 個物件)`, defaultCols);
+            if (!colsStr) return;
+            const cols = parseInt(colsStr);
+            if (isNaN(cols) || cols < 1) return;
+
+            const gapStr = prompt("間距 (Gap)?", "120");
+            const gap = parseInt(gapStr) || 120;
+
+            // 3. Arrange
+            const minX = Math.min(...selected.map(o => o.x));
+            const minY = Math.min(...selected.map(o => o.y));
+
+            sorted.forEach((obj, index) => {
+                const c = index % cols;
+                const r = Math.floor(index / cols);
+                obj.x = minX + c * gap;
+                obj.y = minY + r * gap;
+            });
+
+            renderAll(); saveToLocal();
+        }
+
+        function updateTransform() {
+            document.getElementById('transformLayer').style.transform = `translate(${appState.panX}px, ${appState.panY}px) scale(${appState.scale})`;
+            document.getElementById('zoomLevelDisplay').innerText = Math.round(appState.scale * 100) + '%';
+        }
+        function zoomIn() { appState.scale *= 1.2; updateTransform(); saveToLocal(); }
+        function zoomOut() { appState.scale *= 0.8; updateTransform(); saveToLocal(); }
+        function autoFitZoom() {
+            if(mapObjects.length === 0) return;
+            const xs = mapObjects.map(o => o.x); const ys = mapObjects.map(o => o.y);
+            const minX = Math.min(...xs), maxX = Math.max(...xs) + 180;
+            const minY = Math.min(...ys), maxY = Math.max(...ys) + 180;
+            const cvs = document.getElementById('floorCanvas');
+            const s = Math.min((cvs.clientWidth-100)/(maxX-minX), (cvs.clientHeight-100)/(maxY-minY), 1.5);
+            appState.scale = Math.max(0.2, s);
+            appState.panX = (cvs.clientWidth - (maxX-minX)*appState.scale)/2 - minX*appState.scale;
+            appState.panY = (cvs.clientHeight - (maxY-minY)*appState.scale)/2 - minY*appState.scale;
+            updateTransform();
+            saveToLocal();
+        }
+
+        // --- Modals ---
+        function toggleLock() {
+            appState.locked = !appState.locked;
+            document.getElementById('lockLayout').checked = appState.locked;
+            document.getElementById('lockLabel').innerText = appState.locked ? "🔒 已鎖定" : "🔓 解鎖編輯";
+            saveToLocal();
+            renderMap();
+        }
+        function toggleSnap() {
+            appState.snapToGrid = !appState.snapToGrid;
+            document.getElementById('snapGrid').checked = appState.snapToGrid;
+            saveToLocal();
+        }
+        function openModal(id) {
+            editingObjectId = id;
+            document.getElementById('modalInput').value = mapObjects.find(o => o.id === id).name;
+            document.getElementById('modalOverlay').classList.remove('hidden');
+            setTimeout(() => document.getElementById('modalInput').focus(), 50);
+        }
+        function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); }
+        function saveModal() {
+            recordState();
+            const name = document.getElementById('modalInput').value.trim();
+            if(name) { mapObjects.find(o => o.id === editingObjectId).name = name; renderMap(); saveToLocal(); }
+            closeModal();
+        }
+        function switchTab(t) {
+            ['tab-guests', 'tab-layout'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+                document.getElementById('btn-'+id).classList.remove('border-blue-600', 'bg-blue-50', 'text-blue-600');
+            });
+            document.getElementById(t).classList.remove('hidden');
+            document.getElementById('btn-'+t).classList.add('border-blue-600', 'bg-blue-50', 'text-blue-600');
+        }
+
+        // --- Export Excel ---
+        function exportExcel() {
+            if(guests.length === 0) return alert('無名單');
+            const data = [];
+            const seated = guests.filter(g=>g.tableId), unseated = guests.filter(g=>!g.tableId);
+            seated.sort((a,b) => {
+                const ta = mapObjects.find(o=>o.id===a.tableId), tb = mapObjects.find(o=>o.id===b.tableId);
+                return (ta?parseInt(ta.name.replace(/\D/g,''))||0:999) - (tb?parseInt(tb.name.replace(/\D/g,''))||0:999);
+            });
+            seated.concat(unseated).forEach(g => {
+                const t = mapObjects.find(o => o.id === g.tableId);
+                data.push({ "桌號": t?t.name:"-", "單位": g.unit, "姓名": g.name, "人數": g.count, "狀態": t?"已入席":"未入席" });
+            });
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "名單");
+            XLSX.writeFile(wb, "活動名單.xlsx");
+        }
+
+        // --- Export Web Package (Small Circle Mode Forced) ---
+        async function exportWebPackage() {
+            if(mapObjects.length === 0) return alert('場地是空的');
+
+            // Force prepare data as if we are in layout mode (small circles)
+            // Even if user is currently in Assign mode, we use width=80 for export calculation
+            const exportData = {
+                date: new Date().toISOString().split('T')[0],
+                objects: mapObjects.map(o => ({
+                    id: o.id, type: o.type,
+                    // If it's a table, we export it as a small circle (80px), using center point of current position
+                    // We assume current x,y is top-left. 
+                    // To keep visual center consistent if coming from Large mode:
+                    //   Center = x + w/2. New X = Center - NewW/2.
+                    // But to keep it simple, we trust the Layout Mode arrangement.
+                    // 如果處於分散模式，匯出時使用原始座標 (ox, oy)
+                    x: Math.round(o.ox !== undefined ? o.ox : o.x), 
+                    y: Math.round(o.oy !== undefined ? o.oy : o.y),
+                    w: (o.type==='table') ? 80 : o.width,
+                    h: (o.type==='table') ? 80 : o.height,
+                    name: o.name
+                })),
+                guests: guests.filter(g => g.tableId).map(g => ({ unit: g.unit, name: g.name, count: g.count, tableId: g.tableId }))
+            };
+
+            const xs = exportData.objects.map(o => o.x); const ys = exportData.objects.map(o => o.y);
+            const minX = Math.min(...xs) - 50, maxX = Math.max(...xs) + 200;
+            const minY = Math.min(...ys) - 50, maxY = Math.max(...ys) + 200;
+            const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+
+            try {
+                const response = await fetch('template/search_template.html');
+                if (!response.ok) throw new Error('無法讀取範本檔案 (template/search_template.html)');
+                let htmlContent = await response.text();
+
+                htmlContent = htmlContent.replace('{{DATA_JSON}}', JSON.stringify(exportData));
+                htmlContent = htmlContent.replace('{{VIEWBOX}}', viewBox);
+                htmlContent = htmlContent.replace('{{UPDATE_DATE}}', exportData.date);
+
+                const blob = new Blob([htmlContent], {type: 'text/html'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `座位查詢系統_${exportData.date}.html`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error(err);
+                alert('匯出失敗：無法讀取範本檔案。\n請確保 template/search_template.html 存在，且透過 Web Server (http/https) 執行此網頁，而非直接開啟檔案 (file://)。');
+            }
+        }
+    </script>
+</body>
+</html>

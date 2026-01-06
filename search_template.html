@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+    <title>座位查詢</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body{font-family:sans-serif;background:#fcfcfc;overscroll-behavior:none}
+        .seat-circle{transition:all 0.3s;cursor:pointer;fill:#fed7aa;stroke:#f97316;stroke-width:2}
+        .seat-active{fill:#fef08a!important;stroke:#eab308!important;stroke-width:4;animation:pulse 1.5s infinite}
+        @keyframes pulse{0%{stroke-opacity:1}50%{stroke-opacity:0.5}100%{stroke-opacity:1}}
+        .main-table{fill:#fee2e2;stroke:#ef4444}
+        .stage{fill:#3b82f6;opacity:0.8}
+        .label-box{fill:#e2e8f0;stroke:#94a3b8}
+        text{pointer-events:none;font-weight:bold;text-anchor:middle;dominant-baseline:middle;fill:#475569}
+        #svg-container{touch-action:none;cursor:grab;width:100%;height:100%}
+        #svg-container:active{cursor:grabbing}
+    </style>
+</head>
+<body class="h-screen flex flex-col bg-gray-50">
+    <div class="p-4 bg-white shadow z-10 flex-none">
+        <div class="relative">
+            <i class="fa-solid fa-search absolute left-3 top-4 text-gray-400"></i>
+            <input type="text" id="search" class="w-full pl-10 py-3 border rounded-xl bg-gray-50 text-lg" placeholder="搜尋姓名/單位...">
+            <i class="fa-solid fa-times-circle absolute right-3 top-4 text-gray-400 hidden cursor-pointer" id="clearBtn" onclick="resetSearch()"></i>
+        </div>
+        <div class="text-[10px] text-gray-400 text-right mt-1">Update: {{UPDATE_DATE}}</div>
+    </div>
+    <div class="flex-grow flex flex-col overflow-hidden relative">
+        <div class="h-[50vh] bg-slate-50 relative border-b overflow-hidden" id="map-wrap">
+            <div class="absolute top-2 right-2 z-10">
+                <button onclick="resetZoom()" class="bg-white/90 px-3 py-1 rounded-full shadow text-sm font-bold text-gray-700">重置</button>
+            </div>
+            <div id="svg-container"></div>
+        </div>
+        <div class="flex-grow bg-white p-4 overflow-y-auto" id="results">
+            <div class="text-center text-gray-400 mt-10">請搜尋</div>
+        </div>
+    </div>
+    <script>
+        const data = {{DATA_JSON}};
+        const svgBox = document.getElementById('svg-container');
+        const viewBox = "{{VIEWBOX}}";
+        let currentScale = 1, panX = 0, panY = 0, isPan = false, startP = {x: 0, y: 0};
+        
+        let svg = `<svg id="mainSvg" viewBox="${viewBox}" style="width:100%;height:100%;transition:transform 0.1s">`;
+        
+        data.objects.forEach(o => {
+            let cx = o.x + o.w / 2;
+            let cy = o.y + o.h / 2;
+            if (o.type === 'table') {
+                svg += `<g id="g-${o.id}" onclick="searchTable('${o.id}')"><circle cx="${cx}" cy="${cy}" r="${o.w / 2}" class="seat-circle" id="s-${o.id}"/><text x="${cx}" y="${cy}" font-size="14">${o.name}</text></g>`
+            } else if (o.type === 'main-table') {
+                svg += `<g id="g-${o.id}" onclick="searchTable('${o.id}')"><circle cx="${cx}" cy="${cy}" r="${o.w / 2}" class="seat-circle main-table" id="s-${o.id}"/><text x="${cx}" y="${cy}" font-size="16" fill="#b91c1c">${o.name}</text></g>`
+            } else if (o.type === 'stage') {
+                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="stage"/><text x="${cx}" y="${cy}" fill="white">${o.name}</text>`
+            } else if (o.type === 'label') {
+                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="label-box"/><text x="${cx}" y="${cy}">${o.name}</text>`
+            }
+        });
+        svg += '</svg>';
+        
+        svgBox.innerHTML = svg;
+        const svgEl = document.getElementById('mainSvg');
+        const searchInput = document.getElementById('search');
+        const resDiv = document.getElementById('results');
+        
+        searchInput.addEventListener('input', e => {
+            const q = e.target.value.trim().toLowerCase();
+            document.getElementById('clearBtn').style.display = q ? 'block' : 'none';
+            if (!q) {
+                renderList([]);
+                resetMap();
+                return
+            }
+            const hits = data.guests.filter(g => {
+                const t = data.objects.find(o => o.id === g.tableId);
+                const tName = t ? t.name.toLowerCase() : '';
+                return g.name.toLowerCase().includes(q) || g.unit.toLowerCase().includes(q) || tName.includes(q)
+            });
+            renderList(hits);
+            const hitTables = [...new Set(hits.map(g => g.tableId))];
+            document.querySelectorAll('.seat-active').forEach(e => e.classList.remove('seat-active'));
+            hitTables.forEach(tid => {
+                const el = document.getElementById('s-' + tid);
+                if (el) el.classList.add('seat-active')
+            })
+        });
+
+        function searchTable(tid) {
+            const obj = data.objects.find(o => o.id === tid);
+            if (obj) {
+                searchInput.value = obj.name;
+                searchInput.dispatchEvent(new Event('input'))
+            }
+        }
+
+        function renderList(list) {
+            if (list.length === 0 && searchInput.value) {
+                resDiv.innerHTML = '<div class="text-center text-gray-400">查無此人</div>';
+                return
+            }
+            if (list.length === 0) {
+                resDiv.innerHTML = '';
+                return
+            }
+            let html = '<div class="space-y-3">';
+            list.forEach(g => {
+                const t = data.objects.find(o => o.id === g.tableId);
+                const tName = t ? t.name : '未定';
+                html += `<div class="bg-blue-50 p-3 rounded-lg flex justify-between items-center border border-blue-100 cursor-pointer" onclick="focusTable('${g.tableId}')"><div><div class="font-bold text-lg">${g.name} ${g.count > 1 ? '(x' + g.count + ')' : ''}</div><div class="text-gray-500 text-sm">${g.unit}</div></div><div class="text-2xl font-bold text-blue-600">${tName}</div></div>`
+            });
+            html += '</div>';
+            resDiv.innerHTML = html
+        }
+
+        function resetSearch() {
+            searchInput.value = '';
+            searchInput.dispatchEvent(new Event('input'))
+        }
+
+        function resetMap() {
+            document.querySelectorAll('.seat-active').forEach(e => e.classList.remove('seat-active'));
+            resetZoom()
+        }
+
+        function focusTable(tid) {
+            const obj = data.objects.find(o => o.id === tid);
+            if (!obj) return;
+            document.getElementById('s-' + tid).classList.add('seat-active')
+        }
+        svgBox.addEventListener('wheel', e => {
+            e.preventDefault();
+            const s = Math.sign(e.deltaY) > 0 ? 0.9 : 1.1;
+            currentScale *= s;
+            updateT()
+        });
+        svgBox.addEventListener('mousedown', e => {
+            isPan = true;
+            startP = {
+                x: e.clientX - panX,
+                y: e.clientY - panY
+            }
+        });
+        window.addEventListener('mousemove', e => {
+            if (isPan) {
+                panX = e.clientX - startP.x;
+                panY = e.clientY - startP.y;
+                updateT()
+            }
+        });
+        window.addEventListener('mouseup', () => isPan = false);
+
+        function updateT() {
+            svgEl.style.transform = `translate(${panX}px,${panY}px) scale(${currentScale})`
+        }
+
+        function resetZoom() {
+            currentScale = 1;
+            panX = 0;
+            panY = 0;
+            updateT()
+        }
+    </script>
+</body>
+</html>
