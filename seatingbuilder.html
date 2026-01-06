@@ -14,15 +14,24 @@
         #floorCanvas { background-color: #f8fafc; cursor: grab; overflow: hidden; }
         #floorCanvas:active { cursor: grabbing; }
         #transformLayer {
-            transform-origin: 0 0; position: absolute; top: 0; left: 0;
-            background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
-            background-size: 40px 40px; width: 10000px; height: 10000px;
+            transform-origin: 0 0; position: absolute; top: 50%; left: 50%;
+            width: 0; height: 0; overflow: visible;
         }
-        /* Grid Axes */
-        #transformLayer::before {
-            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
-            background: linear-gradient(to right, #94a3b8 2px, transparent 2px) 0 0 / 100% 100% no-repeat,
-                        linear-gradient(to bottom, #94a3b8 2px, transparent 2px) 0 0 / 100% 100% no-repeat;
+        /* Infinite Grid & Axes */
+        .grid-background {
+            position: absolute; top: -20000px; left: -20000px; width: 40000px; height: 40000px;
+            background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+            background-size: 40px 40px;
+            background-position: 20000px 20000px; /* Align grid to 0,0 */
+            pointer-events: none; z-index: -10;
+        }
+        .axis-line { position: absolute; background: #94a3b8; pointer-events: none; z-index: -5; }
+        .axis-x { top: 0; left: -20000px; width: 40000px; height: 2px; }
+        .axis-y { left: 0; top: -20000px; height: 40000px; width: 2px; }
+        
+        /* Center Label */
+        .origin-label {
+            position: absolute; top: 2px; left: 4px; font-size: 10px; color: #64748b; pointer-events: none; z-index: -4;
         }
 
         .draggable-item { position: absolute; user-select: none; transition: box-shadow 0.2s; }
@@ -35,6 +44,12 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth transition between modes */
         }
+        /* Main Table Variant */
+        .table-node.type-main {
+            background-color: #fee2e2; border-color: #ef4444; color: #b91c1c;
+        }
+        .table-node.type-main .guest-chip { border-color: #fca5a5; }
+
         .table-node.drag-over { border-color: #3b82f6; background-color: #eff6ff; }
 
         /* Mode: Assign (Large Rect) */
@@ -50,6 +65,9 @@
             align-items: center; justify-content: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        .table-node.mode-layout.type-main {
+            border-color: #ef4444; background-color: #fee2e2;
+        }
         .table-node.mode-layout:hover {
             transform: scale(1.05);
             border-color: #ea580c;
@@ -59,11 +77,6 @@
         .obj-stage {
             background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;
             font-weight: bold; border-radius: 4px; opacity: 0.9; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-        }
-        .obj-main-table {
-            border-radius: 50%; background: #fee2e2; border: 3px solid #ef4444;
-            display: flex; align-items: center; justify-content: center; font-weight: bold; color: #b91c1c;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         .obj-label {
             background: #e2e8f0; border: 1px solid #94a3b8; color: #475569; padding: 5px 15px;
@@ -82,17 +95,6 @@
         /* Selection & Marquee */
         .selected-obj { outline: 2px solid #3b82f6; outline-offset: 2px; z-index: 60 !important; }
         #selectionMarquee { position: absolute; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.2); display: none; z-index: 9999; pointer-events: none; }
-
-        /* Center Marker */
-        .center-marker {
-            position: absolute; pointer-events: none; z-index: 1;
-            width: 200px; height: 200px;
-            transform: translate(-50%, -50%);
-        }
-        .center-marker::before, .center-marker::after { content: ''; position: absolute; background: rgba(239, 68, 68, 0.3); top: 50%; left: 50%; transform: translate(-50%, -50%); }
-        .center-marker::before { width: 100%; height: 1px; }
-        .center-marker::after { height: 100%; width: 1px; }
-        .center-marker-label { position: absolute; top: 5px; left: 5px; font-size: 10px; color: rgba(239, 68, 68, 0.6); white-space: nowrap; }
     </style>
 </head>
 <body class="h-screen flex flex-col bg-gray-50 text-gray-800">
@@ -258,15 +260,21 @@
         // State
         let mapObjects = []; 
         let guests = [];
-        let appState = { scale: 1, panX: 0, panY: 0, locked: false, viewMode: 'assign', isSpread: false, toolMode: 'select', selectedIds: [], snapToGrid: false, isSpaceDown: false, scaleOrigin: {x:0, y:0} }; // 'assign' or 'layout'
+        let appState = { scale: 1, panX: 0, panY: 0, locked: false, viewMode: 'assign', isSpread: false, toolMode: 'select', selectedIds: [], snapToGrid: false, isSpaceDown: false }; // 'assign' or 'layout'
         let editingObjectId = null;
         let historyStack = [];
         let redoStack = [];
 
         // Constants
         const SIZES = {
-            assign: { w: 180, h: 180 }, // Large box
-            layout: { w: 80, h: 80 }    // Small circle
+            table: {
+                assign: { w: 240, h: 240 }, // Standard Table (Large)
+                layout: { w: 80, h: 80 }    // Standard Table (Small)
+            },
+            'main-table': {
+                assign: { w: 300, h: 300 }, // Main Table (Extra Large)
+                layout: { w: 120, h: 120 }  // Main Table (Medium Circle)
+            }
         };
         const ASSIGN_SCALE = 2.5; // Scale factor for Assign Mode
 
@@ -391,44 +399,49 @@
             if (appState.viewMode === mode) return;
 
             if (mode === 'assign') {
-                // Layout -> Assign: Scale up coordinates relative to Center
-                // 1. Calculate Center of Layout (Bounding Box)
-                let cx = 0, cy = 0;
-                if (mapObjects.length > 0) {
-                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                    mapObjects.forEach(o => {
-                        minX = Math.min(minX, o.x);
-                        maxX = Math.max(maxX, o.x + o.width);
-                        minY = Math.min(minY, o.y);
-                        maxY = Math.max(maxY, o.y + o.height);
-                    });
-                    cx = (minX + maxX) / 2;
-                    cy = (minY + maxY) / 2;
-                }
-                appState.scaleOrigin = { x: cx, y: cy };
-
-                // 2. Apply Scale relative to Center
+                // Layout -> Assign: Scale Center relative to Origin (0,0)
                 mapObjects.forEach(o => {
-                    o.ox = o.x; // Save original layout pos
+                    // 1. Current Center (Layout)
+                    const cx = o.x + o.width / 2;
+                    const cy = o.y + o.height / 2;
+                    
+                    o.ox = o.x; 
                     o.oy = o.y;
-                    o.x = cx + (o.x - cx) * ASSIGN_SCALE;
-                    o.y = cy + (o.y - cy) * ASSIGN_SCALE;
+
+                    // 2. Update Dimensions
+                    if (SIZES[o.type]) {
+                        o.width = SIZES[o.type].assign.w;
+                        o.height = SIZES[o.type].assign.h;
+                    }
+
+                    // 3. Scale Center
+                    const newCx = cx * ASSIGN_SCALE;
+                    const newCy = cy * ASSIGN_SCALE;
+
+                    o.x = newCx - o.width / 2;
+                    o.y = newCy - o.height / 2;
                 });
             } else {
-                // Assign -> Layout: Restore original coordinates
-                const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
-                const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
-
+                // Assign -> Layout
                 mapObjects.forEach(o => {
-                    if (o.ox !== undefined) {
-                        o.x = o.ox;
-                        o.y = o.oy;
-                        delete o.ox; delete o.oy;
-                    } else {
-                        // Fallback for objects created in assign mode
-                        o.x = cx + (o.x - cx) / ASSIGN_SCALE;
-                        o.y = cy + (o.y - cy) / ASSIGN_SCALE;
+                    // 1. Current Center (Assign)
+                    const cx = o.x + o.width / 2;
+                    const cy = o.y + o.height / 2;
+
+                    // 2. Target Center (Layout)
+                    const newCx = cx / ASSIGN_SCALE;
+                    const newCy = cy / ASSIGN_SCALE;
+
+                    // 3. Update Dimensions
+                    if (SIZES[o.type]) {
+                        o.width = SIZES[o.type].layout.w;
+                        o.height = SIZES[o.type].layout.h;
                     }
+
+                    o.x = newCx - o.width / 2;
+                    o.y = newCy - o.height / 2;
+
+                    delete o.ox; delete o.oy;
                 });
             }
 
@@ -463,15 +476,10 @@
             // Transform Objects dimensions in data model to reflect visual size
             // This ensures drag and drop "center" calculations are correct
             mapObjects.forEach(obj => {
-                if (obj.type === 'table') {
-                    // Update width/height based on mode
-                    if(mode === 'layout') {
-                        obj.width = SIZES.layout.w;
-                        obj.height = SIZES.layout.h;
-                    } else {
-                        obj.width = SIZES.assign.w;
-                        obj.height = SIZES.assign.h; // Min height, expands in CSS
-                    }
+                if (SIZES[obj.type]) {
+                    const size = SIZES[obj.type][mode];
+                    obj.width = size.w;
+                    obj.height = size.h;
                 }
             });
 
@@ -593,11 +601,10 @@
                             appState.snapToGrid = data.appState.snapToGrid;
                             const cb = document.getElementById('snapGrid'); if(cb) cb.checked = appState.snapToGrid;
                         }
-                        if(data.appState.scaleOrigin) appState.scaleOrigin = data.appState.scaleOrigin;
                     }
                 } catch(e) { console.error(e); }
             } else {
-                addMapObject('stage', 400, 50);
+                addMapObject('stage', -200, -100); // Center stage (width 400) at x=0
                 generateGridTables();
             }
         }
@@ -615,21 +622,20 @@
         function addMapObject(type, x, y, isBatch = false) {
             if(!isBatch) recordState();
             if (x === undefined) {
-                const cvs = document.getElementById('floorCanvas');
-                x = (-appState.panX + cvs.clientWidth/2) / appState.scale;
-                y = (-appState.panY + cvs.clientHeight/2) / appState.scale;
+                // Spawn at center of view (0,0 relative to layer origin + pan)
+                x = -appState.panX / appState.scale;
+                y = -appState.panY / appState.scale;
             }
             const id = genId();
             let newObj = { id, type, x, y, width: 180, height: 180, name: '' };
 
-            if (type === 'table') {
-                newObj.name = `第 ${mapObjects.filter(o=>o.type==='table').length + 1} 桌`;
+            if (SIZES[type]) {
                 // Use size based on current mode
-                const size = SIZES[appState.viewMode];
+                const size = SIZES[type][appState.viewMode];
                 newObj.width = size.w;
                 newObj.height = size.h;
-            } else if (type === 'main-table') {
-                newObj.name = '主桌'; newObj.width = 220; newObj.height = 220;
+                if (type === 'table') newObj.name = `第 ${mapObjects.filter(o=>o.type==='table').length + 1} 桌`;
+                else newObj.name = '主桌';
             } else if (type === 'stage') {
                 newObj.name = '舞 台 STAGE'; newObj.width = 400; newObj.height = 60;
             } else if (type === 'label') {
@@ -638,10 +644,12 @@
             mapObjects.push(newObj);
             
             if (appState.viewMode === 'assign') {
-                const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
-                const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
-                newObj.ox = cx + (newObj.x - cx) / ASSIGN_SCALE;
-                newObj.oy = cy + (newObj.y - cy) / ASSIGN_SCALE;
+                const cx = newObj.x + newObj.width / 2;
+                const cy = newObj.y + newObj.height / 2;
+                const lw = SIZES[type] ? SIZES[type].layout.w : newObj.width;
+                const lh = SIZES[type] ? SIZES[type].layout.h : newObj.height;
+                newObj.ox = (cx / ASSIGN_SCALE) - lw / 2;
+                newObj.oy = (cy / ASSIGN_SCALE) - lh / 2;
             }
 
             if(!isBatch) {
@@ -657,7 +665,7 @@
             const rows = parseInt(document.getElementById('rowsInput').value) || 3;
             const gap = parseInt(document.getElementById('gapInput').value) || 120;
             
-            let startY = 150;
+            let startY = 50;
             mapObjects.forEach(o => { if(o.y + o.height > startY) startY = o.y + o.height + 50; });
             let count = mapObjects.filter(o => o.type === 'table').length + 1;
 
@@ -665,8 +673,10 @@
             setViewMode('layout');
 
             for (let r = 0; r < rows; r++) {
+                // Center the grid horizontally around 0
+                const startX = -(cols * gap) / 2 + gap/2;
                 for (let c = 0; c < cols; c++) {
-                    let obj = addMapObject('table', 50 + c * gap, startY + r * gap, true);
+                    let obj = addMapObject('table', startX + c * gap, startY + r * gap, true);
                     obj.name = `第 ${count++} 桌`;
                 }
             }
@@ -697,33 +707,13 @@
             const container = document.getElementById('transformLayer');
             container.innerHTML = '';
 
-            // --- Draw Center Marker ---
-            let cx = 0, cy = 0, showMarker = false;
-            if (appState.viewMode === 'assign') {
-                if (appState.scaleOrigin) {
-                    cx = appState.scaleOrigin.x;
-                    cy = appState.scaleOrigin.y;
-                    showMarker = true;
-                }
-            } else {
-                // Layout mode: Calculate dynamic center
-                if (mapObjects.length > 0) {
-                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                    mapObjects.forEach(o => {
-                        minX = Math.min(minX, o.x); maxX = Math.max(maxX, o.x + o.width);
-                        minY = Math.min(minY, o.y); maxY = Math.max(maxY, o.y + o.height);
-                    });
-                    if (minX !== Infinity) { cx = (minX + maxX) / 2; cy = (minY + maxY) / 2; showMarker = true; }
-                }
-            }
-
-            if (showMarker) {
-                const marker = document.createElement('div');
-                marker.className = 'center-marker';
-                marker.style.left = cx + 'px'; marker.style.top = cy + 'px';
-                marker.innerHTML = '<span class="center-marker-label">縮放中心</span>';
-                container.appendChild(marker);
-            }
+            // --- Draw Grid & Axes ---
+            container.innerHTML += `
+                <div class="grid-background"></div>
+                <div class="axis-line axis-x"></div>
+                <div class="axis-line axis-y"></div>
+                <div class="origin-label">0,0</div>
+            `;
 
             mapObjects.forEach(obj => {
                 const el = document.createElement('div');
@@ -743,15 +733,15 @@
                     const seatedCount = guests.filter(g => g.tableId === obj.id).reduce((acc,g) => acc + (g.count||1), 0);
 
                     // Class Handling
-                    el.className += isMain ? ' obj-main-table flex-col' : ` table-node mode-${appState.viewMode}`;
+                    el.className += ` table-node mode-${appState.viewMode} ${isMain ? 'type-main' : ''}`;
                     
                     // Content
-                    if(isLayout && !isMain) {
-                        // Small Circle Content
+                    if(isLayout) {
+                        // Small Circle Content (Layout Mode)
                         el.innerHTML = `
                             <div class="flex flex-col items-center justify-center h-full pointer-events-none" onclick="openModal('${obj.id}')">
-                                <span class="font-bold text-gray-700 text-sm leading-none">${obj.name}</span>
-                                <span class="text-[10px] text-orange-600 font-bold bg-orange-100 px-1 rounded mt-1">${seatedCount}人</span>
+                                <span class="font-bold ${isMain ? 'text-red-800' : 'text-gray-700'} text-sm leading-none">${obj.name}</span>
+                                ${!isMain ? `<span class="text-[10px] text-orange-600 font-bold bg-orange-100 px-1 rounded mt-1">${seatedCount}人</span>` : ''}
                             </div>
                             ${!appState.locked ? `<button onclick="deleteObject('${obj.id}')" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] hover:scale-110 pointer-events-auto">×</button>`:''}
                         `;
@@ -761,7 +751,7 @@
                         header.className = isMain ? 'mt-4 mb-2 text-center' : 'bg-gray-100 p-2 border-b border-gray-200 flex justify-between items-center cursor-pointer hover:bg-gray-200 transition group';
                         
                         if (isMain) {
-                            header.innerHTML = `<span class="text-xl cursor-pointer" onclick="openModal('${obj.id}')">${obj.name} <i class="fa-solid fa-pen text-xs opacity-50"></i></span>`;
+                            header.innerHTML = `<span class="text-xl font-bold text-red-800 cursor-pointer" onclick="openModal('${obj.id}')">${obj.name} <i class="fa-solid fa-pen text-xs opacity-50"></i></span>`;
                             const del = document.createElement('button');
                             del.className = 'absolute top-0 right-0 p-2 text-red-400 hover:text-red-600';
                             if(!appState.locked) del.innerHTML = '<i class="fa-solid fa-times"></i>';
@@ -782,7 +772,7 @@
                         el.appendChild(header);
 
                         const guestBox = document.createElement('div');
-                        guestBox.className = 'flex-1 w-full overflow-y-auto p-1 space-y-1 ' + (isMain ? 'px-6 pb-6' : 'bg-white');
+                        guestBox.className = 'flex-1 w-full overflow-y-auto p-1 space-y-1 ' + (isMain ? 'px-4 pb-4' : 'bg-white');
                         guestBox.addEventListener('wheel', e => e.stopPropagation(), {passive:false});
 
                         const tableGuests = guests.filter(g => g.tableId === obj.id);
@@ -923,13 +913,15 @@
                     
                     // Update ox/oy if moved in Assign Mode
                     if (appState.viewMode === 'assign') {
-                         const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
-                         const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
                          appState.selectedIds.forEach(id => {
                             const o = mapObjects.find(i => i.id === id);
                             if (o) { 
-                                o.ox = cx + (o.x - cx) / ASSIGN_SCALE; 
-                                o.oy = cy + (o.y - cy) / ASSIGN_SCALE; 
+                                const cx = o.x + o.width / 2;
+                                const cy = o.y + o.height / 2;
+                                const lw = SIZES[o.type] ? SIZES[o.type].layout.w : o.width;
+                                const lh = SIZES[o.type] ? SIZES[o.type].layout.h : o.height;
+                                o.ox = (cx / ASSIGN_SCALE) - lw / 2;
+                                o.oy = (cy / ASSIGN_SCALE) - lh / 2;
                             }
                          });
                     }
@@ -1104,11 +1096,15 @@
                 updateSelectionVisuals();
                 return;
             }
+            
+            const canvas = document.getElementById('floorCanvas');
+            const centerX = canvas.clientWidth / 2;
+            const centerY = canvas.clientHeight / 2;
 
             mapObjects.forEach(o => {
                 // Object screen coordinates
-                const ox = o.x * appState.scale + appState.panX;
-                const oy = o.y * appState.scale + appState.panY;
+                const ox = centerX + appState.panX + o.x * appState.scale;
+                const oy = centerY + appState.panY + o.y * appState.scale;
                 const ow = o.width * appState.scale;
                 const oh = o.height * appState.scale;
 
@@ -1255,8 +1251,11 @@
             const cvs = document.getElementById('floorCanvas');
             const s = Math.min((cvs.clientWidth-100)/(maxX-minX), (cvs.clientHeight-100)/(maxY-minY), 1.5);
             appState.scale = Math.max(0.2, s);
-            appState.panX = (cvs.clientWidth - (maxX-minX)*appState.scale)/2 - minX*appState.scale;
-            appState.panY = (cvs.clientHeight - (maxY-minY)*appState.scale)/2 - minY*appState.scale;
+            // Center the view on the center of the objects
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+            appState.panX = -cx * appState.scale;
+            appState.panY = -cy * appState.scale;
             updateTransform();
             saveToLocal();
         }
@@ -1333,8 +1332,8 @@
                     // 如果處於分散模式，匯出時使用原始座標 (ox, oy)
                     x: Math.round(o.ox !== undefined ? o.ox : o.x), 
                     y: Math.round(o.oy !== undefined ? o.oy : o.y),
-                    w: (o.type==='table') ? 80 : o.width,
-                    h: (o.type==='table') ? 80 : o.height,
+                    w: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.width),
+                    h: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.height),
                     name: o.name
                 })),
                 guests: guests.filter(g => g.tableId).map(g => ({ unit: g.unit, name: g.name, count: g.count, tableId: g.tableId }))
