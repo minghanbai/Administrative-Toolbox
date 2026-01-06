@@ -413,10 +413,11 @@
         }
 
         // --- View Mode Logic ---
-        function setViewMode(mode) {
-            if (appState.viewMode === mode) return;
+        function setViewMode(mode, isRestoring = false) {
+            if (!isRestoring && appState.viewMode === mode) return;
 
-            if (mode === 'assign') {
+            if (!isRestoring) {
+                if (mode === 'assign') {
                 // Layout -> Assign: Scale Center relative to Origin (0,0)
                 mapObjects.forEach(o => {
                     // 1. Current Center (Layout)
@@ -439,7 +440,7 @@
                     o.x = newCx - o.width / 2;
                     o.y = newCy - o.height / 2;
                 });
-            } else {
+                } else {
                 // Assign -> Layout
                 mapObjects.forEach(o => {
                     // 1. Current Center (Assign)
@@ -461,6 +462,7 @@
 
                     delete o.ox; delete o.oy;
                 });
+                }
             }
 
             // 佈置模式預設開啟吸附格點
@@ -502,8 +504,10 @@
             });
 
             renderAll();
-            saveToLocal();
-            autoFitZoom(); // Re-center view after coordinate shift
+            if (!isRestoring) {
+                saveToLocal();
+                autoFitZoom(); // Re-center view after coordinate shift
+            }
         }
 
         function toggleSpread() {
@@ -613,12 +617,13 @@
                         appState.scale = data.appState.scale || 1;
                         appState.panX = data.appState.panX || 0;
                         appState.panY = data.appState.panY || 0;
-                        if(data.appState.viewMode) setViewMode(data.appState.viewMode);
+                        if(data.appState.viewMode) setViewMode(data.appState.viewMode, true);
                         if(data.appState.toolMode) setTool(data.appState.toolMode);
                         if(data.appState.snapToGrid !== undefined) {
                             appState.snapToGrid = data.appState.snapToGrid;
                             const cb = document.getElementById('snapGrid'); if(cb) cb.checked = appState.snapToGrid;
                         }
+                        updateTransform();
                     }
                 } catch(e) { console.error(e); }
             } else {
@@ -1097,9 +1102,12 @@
                     canvasRect = null;
                 }
             });
+            let zoomTimeout;
             canvas.addEventListener('wheel', e => {
                 e.preventDefault(); const delta = e.deltaY > 0 ? 0.9 : 1.1;
                 appState.scale = Math.max(0.1, Math.min(5, appState.scale * delta)); updateTransform();
+                clearTimeout(zoomTimeout);
+                zoomTimeout = setTimeout(saveToLocal, 500);
             });
         }
 
