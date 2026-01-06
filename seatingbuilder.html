@@ -95,6 +95,23 @@
         /* Selection & Marquee */
         .selected-obj { outline: 2px solid #3b82f6; outline-offset: 2px; z-index: 60 !important; }
         #selectionMarquee { position: absolute; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.2); display: none; z-index: 9999; pointer-events: none; }
+
+        /* Print Styles (Vector PDF) */
+        @media print {
+            @page { size: landscape; margin: 5mm; }
+            body { 
+                margin: 0 !important; padding: 0 !important; 
+                width: 100vw; height: 100vh; 
+                display: flex !important; justify-content: center; align-items: center;
+                background: white !important;
+            }
+            body > *:not(#print-container) { display: none !important; }
+            #print-container { display: block !important; width: 297mm; height: 210mm; position: relative; overflow: hidden; }
+            #print-content { position: absolute; top: 50%; left: 50%; transform-origin: center center; }
+            .print-color-adjust {
+                -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+            }
+        }
     </style>
 </head>
 <body class="h-screen flex flex-col bg-gray-50 text-gray-800">
@@ -147,6 +164,7 @@
             <button onclick="resetData()" class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded text-sm transition" title="清空"><i class="fa-solid fa-trash-can"></i></button>
             <div class="h-6 w-[1px] bg-gray-300 mx-1"></div>
             <button onclick="exportExcel()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button onclick="exportPDF()" id="btn-export-pdf" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-file-pdf"></i> PDF</button>
             <button onclick="exportWebPackage()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-globe"></i> 打包網頁</button>
         </div>
     </header>
@@ -1312,6 +1330,101 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "名單");
             XLSX.writeFile(wb, "活動名單.xlsx");
+        }
+
+        // --- Export PDF (Vector via System Print) ---
+        function exportPDF() {
+            if (appState.viewMode !== 'assign') {
+                alert('請先切換至「排位模式 (大)」再進行 PDF 輸出，以確保版面與內容正確。');
+                return;
+            }
+            
+            // 1. Create Print Container
+            const container = document.createElement('div');
+            container.id = 'print-container';
+            container.style.display = 'none';
+            
+            const content = document.createElement('div');
+            content.id = 'print-content';
+            container.appendChild(content);
+
+            // 2. Calculate Bounds to determine relative positioning
+            const xs = mapObjects.map(o => o.x);
+            const ys = mapObjects.map(o => o.y);
+            const minX = Math.min(...xs);
+            const minY = Math.min(...ys);
+            const maxX = Math.max(...xs.map((x, i) => x + mapObjects[i].width));
+            const maxY = Math.max(...ys.map((y, i) => y + mapObjects[i].height));
+            
+            const padding = 50;
+            const width = maxX - minX + padding * 2;
+            const height = maxY - minY + padding * 2;
+            
+            content.style.width = width + 'px';
+            content.style.height = height + 'px';
+            
+            // Calculate Scale to fit A4 Landscape (approx 1123x794px at 96dpi)
+            // Use a slightly smaller area to ensure margins
+            const A4_WIDTH = 1080; 
+            const A4_HEIGHT = 750;
+            
+            const scaleX = A4_WIDTH / width;
+            const scaleY = A4_HEIGHT / height;
+            const scale = Math.min(scaleX, scaleY); 
+            
+            content.style.transform = `translate(-50%, -50%) scale(${scale})`;
+
+            mapObjects.forEach(obj => {
+                const el = document.createElement('div');
+                el.style.position = 'absolute';
+                el.style.left = (obj.x - minX + padding) + 'px';
+                el.style.top = (obj.y - minY + padding) + 'px';
+                el.style.width = obj.width + 'px';
+                
+                if (obj.type === 'table' || obj.type === 'main-table') {
+                    el.style.height = 'auto'; // Auto height to fit all guests
+                    el.style.minHeight = obj.height + 'px';
+                    el.className = obj.type === 'main-table' 
+                        ? 'bg-red-50 border-2 border-red-500 rounded-xl shadow-sm flex flex-col overflow-hidden text-red-800 print-color-adjust'
+                        : 'bg-white border-2 border-gray-300 rounded-xl shadow-sm flex flex-col overflow-hidden print-color-adjust';
+
+                    const seatedCount = guests.filter(g => g.tableId === obj.id).reduce((acc,g) => acc + (g.count||1), 0);
+                    
+                    // Header
+                    const header = document.createElement('div');
+                    header.className = obj.type === 'main-table' ? 'p-2 text-center font-bold text-lg border-b border-red-200' : 'p-2 bg-gray-100 border-b border-gray-200 flex justify-between items-center';
+                    header.innerHTML = obj.type === 'main-table' ? obj.name : `<span class="font-bold text-gray-700">${obj.name}</span><span class="bg-blue-100 text-blue-800 text-xs px-2 rounded-full print-color-adjust">${seatedCount}</span>`;
+                    el.appendChild(header);
+
+                    // Guest List with Multi-column
+                    const list = document.createElement('div');
+                    list.className = 'p-2 text-xs';
+                    list.style.columnCount = 2; // Force 2 columns
+                    list.style.columnGap = '0.5rem';
+                    
+                    guests.filter(g => g.tableId === obj.id).forEach(g => {
+                        const item = document.createElement('div');
+                        item.className = 'mb-1 break-inside-avoid flex items-center'; // Prevent split
+                        item.innerHTML = `<span class="text-gray-500 mr-1 scale-90 origin-left">${g.unit}</span><span class="font-bold">${g.name}</span>${g.count > 1 ? `<span class="ml-1 text-red-500">x${g.count}</span>` : ''}`;
+                        list.appendChild(item);
+                    });
+                    el.appendChild(list);
+                } else {
+                    el.style.height = obj.height + 'px';
+                    el.className = obj.type === 'stage' ? 'bg-blue-500 text-white flex items-center justify-center font-bold rounded shadow opacity-90 print-color-adjust' : 'bg-gray-200 border border-gray-400 text-gray-600 flex items-center justify-center font-bold rounded-full print-color-adjust';
+                    el.innerText = obj.name;
+                }
+                content.appendChild(el);
+            });
+
+            document.body.appendChild(container);
+
+            // 3. Trigger Print
+            // The browser's print dialog will open. User can choose "Save as PDF".
+            window.print();
+
+            // 4. Cleanup
+            document.body.removeChild(container);
         }
 
         // --- Export Web Package (Small Circle Mode Forced) ---
