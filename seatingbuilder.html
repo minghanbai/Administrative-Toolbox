@@ -18,6 +18,12 @@
             background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
             background-size: 40px 40px; width: 10000px; height: 10000px;
         }
+        /* Grid Axes */
+        #transformLayer::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+            background: linear-gradient(to right, #94a3b8 2px, transparent 2px) 0 0 / 100% 100% no-repeat,
+                        linear-gradient(to bottom, #94a3b8 2px, transparent 2px) 0 0 / 100% 100% no-repeat;
+        }
 
         .draggable-item { position: absolute; user-select: none; transition: box-shadow 0.2s; }
         .draggable-item:hover { z-index: 50; }
@@ -76,6 +82,17 @@
         /* Selection & Marquee */
         .selected-obj { outline: 2px solid #3b82f6; outline-offset: 2px; z-index: 60 !important; }
         #selectionMarquee { position: absolute; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.2); display: none; z-index: 9999; pointer-events: none; }
+
+        /* Center Marker */
+        .center-marker {
+            position: absolute; pointer-events: none; z-index: 1;
+            width: 200px; height: 200px;
+            transform: translate(-50%, -50%);
+        }
+        .center-marker::before, .center-marker::after { content: ''; position: absolute; background: rgba(239, 68, 68, 0.3); top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .center-marker::before { width: 100%; height: 1px; }
+        .center-marker::after { height: 100%; width: 1px; }
+        .center-marker-label { position: absolute; top: 5px; left: 5px; font-size: 10px; color: rgba(239, 68, 68, 0.6); white-space: nowrap; }
     </style>
 </head>
 <body class="h-screen flex flex-col bg-gray-50 text-gray-800">
@@ -241,7 +258,7 @@
         // State
         let mapObjects = []; 
         let guests = [];
-        let appState = { scale: 1, panX: 0, panY: 0, locked: false, viewMode: 'assign', isSpread: false, toolMode: 'select', selectedIds: [], snapToGrid: false }; // 'assign' or 'layout'
+        let appState = { scale: 1, panX: 0, panY: 0, locked: false, viewMode: 'assign', isSpread: false, toolMode: 'select', selectedIds: [], snapToGrid: false, isSpaceDown: false, scaleOrigin: {x:0, y:0} }; // 'assign' or 'layout'
         let editingObjectId = null;
         let historyStack = [];
         let redoStack = [];
@@ -251,6 +268,7 @@
             assign: { w: 180, h: 180 }, // Large box
             layout: { w: 80, h: 80 }    // Small circle
         };
+        const ASSIGN_SCALE = 2.5; // Scale factor for Assign Mode
 
         document.addEventListener('DOMContentLoaded', () => {
             loadFromLocal();
@@ -273,6 +291,24 @@
                 } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
                     e.preventDefault();
                     redo();
+                } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                    if (appState.selectedIds.length > 0) {
+                        e.preventDefault();
+                        deleteObject();
+                    }
+                } else if (e.code === 'Space' && !e.repeat) {
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                    e.preventDefault();
+                    appState.isSpaceDown = true;
+                    document.getElementById('floorCanvas').style.cursor = 'grab';
+                }
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'Space') {
+                    appState.isSpaceDown = false;
+                    const canvas = document.getElementById('floorCanvas');
+                    canvas.style.cursor = appState.toolMode === 'pan' ? 'grab' : 'default';
                 }
             });
         });
@@ -352,9 +388,48 @@
 
         // --- View Mode Logic ---
         function setViewMode(mode) {
-            // 如果切換回佈置模式且目前處於分散狀態，強制復原位置
-            if (mode === 'layout' && appState.isSpread) {
-                toggleSpread();
+            if (appState.viewMode === mode) return;
+
+            if (mode === 'assign') {
+                // Layout -> Assign: Scale up coordinates relative to Center
+                // 1. Calculate Center of Layout (Bounding Box)
+                let cx = 0, cy = 0;
+                if (mapObjects.length > 0) {
+                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                    mapObjects.forEach(o => {
+                        minX = Math.min(minX, o.x);
+                        maxX = Math.max(maxX, o.x + o.width);
+                        minY = Math.min(minY, o.y);
+                        maxY = Math.max(maxY, o.y + o.height);
+                    });
+                    cx = (minX + maxX) / 2;
+                    cy = (minY + maxY) / 2;
+                }
+                appState.scaleOrigin = { x: cx, y: cy };
+
+                // 2. Apply Scale relative to Center
+                mapObjects.forEach(o => {
+                    o.ox = o.x; // Save original layout pos
+                    o.oy = o.y;
+                    o.x = cx + (o.x - cx) * ASSIGN_SCALE;
+                    o.y = cy + (o.y - cy) * ASSIGN_SCALE;
+                });
+            } else {
+                // Assign -> Layout: Restore original coordinates
+                const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
+                const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
+
+                mapObjects.forEach(o => {
+                    if (o.ox !== undefined) {
+                        o.x = o.ox;
+                        o.y = o.oy;
+                        delete o.ox; delete o.oy;
+                    } else {
+                        // Fallback for objects created in assign mode
+                        o.x = cx + (o.x - cx) / ASSIGN_SCALE;
+                        o.y = cy + (o.y - cy) / ASSIGN_SCALE;
+                    }
+                });
             }
 
             // 佈置模式預設開啟吸附格點
@@ -381,10 +456,9 @@
                 btnAssign.classList.add('text-gray-500', 'hover:bg-gray-200');
             }
             
-            // 控制分散按鈕顯示 (只在排位模式顯示)
+            // Hide Spread button (Logic replaced by automatic scaling)
             const btnSpread = document.getElementById('btn-spread');
-            if (mode === 'assign') btnSpread.classList.remove('hidden');
-            else btnSpread.classList.add('hidden');
+            btnSpread.classList.add('hidden');
 
             // Transform Objects dimensions in data model to reflect visual size
             // This ensures drag and drop "center" calculations are correct
@@ -403,6 +477,7 @@
 
             renderAll();
             saveToLocal();
+            autoFitZoom(); // Re-center view after coordinate shift
         }
 
         function toggleSpread() {
@@ -441,6 +516,7 @@
 
         function resolveOverlaps() {
             const padding = 20;
+            const snapThreshold = 10; // 吸附閾值：若軸向偏差小於此值，強制對齊
             // 簡單的迭代式碰撞處理
             for(let k=0; k<50; k++) {
                 let adjusted = false;
@@ -455,13 +531,35 @@
                         
                         if (Math.abs(dx) < minW && Math.abs(dy) < minH) {
                             adjusted = true;
-                            let penX = minW - Math.abs(dx), penY = minH - Math.abs(dy);
-                            if (penX < penY) {
-                                let sign = dx > 0 ? 1 : -1; if(dx===0) sign = Math.random()>0.5?1:-1;
+                            
+                            // 智慧吸附：如果軸向偏差很小，強制對齊該軸，並只在另一軸推開
+                            if (Math.abs(dx) < snapThreshold) {
+                                // 垂直對齊 (X軸相同) -> 強制對齊 X，推開 Y
+                                const avgCx = (acx + bcx) / 2;
+                                a.x = avgCx - a.width/2;
+                                b.x = avgCx - b.width/2;
+                                
+                                let penY = minH - Math.abs(dy);
+                                let sign = dy > 0 ? 1 : -1; if(dy===0) sign = 1;
+                                a.y += sign * penY * 0.5; b.y -= sign * penY * 0.5;
+                            } else if (Math.abs(dy) < snapThreshold) {
+                                // 水平對齊 (Y軸相同) -> 強制對齊 Y，推開 X
+                                const avgCy = (acy + bcy) / 2;
+                                a.y = avgCy - a.height/2;
+                                b.y = avgCy - b.height/2;
+                                
+                                let penX = minW - Math.abs(dx);
+                                let sign = dx > 0 ? 1 : -1; if(dx===0) sign = 1;
                                 a.x += sign * penX * 0.5; b.x -= sign * penX * 0.5;
                             } else {
-                                let sign = dy > 0 ? 1 : -1; if(dy===0) sign = Math.random()>0.5?1:-1;
-                                a.y += sign * penY * 0.5; b.y -= sign * penY * 0.5;
+                                let penX = minW - Math.abs(dx), penY = minH - Math.abs(dy);
+                                if (penX < penY) {
+                                    let sign = dx > 0 ? 1 : -1; if(dx===0) sign = Math.random()>0.5?1:-1;
+                                    a.x += sign * penX * 0.5; b.x -= sign * penX * 0.5;
+                                } else {
+                                    let sign = dy > 0 ? 1 : -1; if(dy===0) sign = Math.random()>0.5?1:-1;
+                                    a.y += sign * penY * 0.5; b.y -= sign * penY * 0.5;
+                                }
                             }
                         }
                     }
@@ -495,13 +593,7 @@
                             appState.snapToGrid = data.appState.snapToGrid;
                             const cb = document.getElementById('snapGrid'); if(cb) cb.checked = appState.snapToGrid;
                         }
-                        // 恢復按鈕狀態
-                        if(appState.isSpread) {
-                            const btn = document.getElementById('btn-spread');
-                            btn.classList.remove('bg-purple-100', 'text-purple-700');
-                            btn.classList.add('bg-purple-600', 'text-white');
-                            btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 復原';
-                        }
+                        if(data.appState.scaleOrigin) appState.scaleOrigin = data.appState.scaleOrigin;
                     }
                 } catch(e) { console.error(e); }
             } else {
@@ -544,6 +636,14 @@
                 newObj.name = '入口處'; newObj.width = 120; newObj.height = 40;
             }
             mapObjects.push(newObj);
+            
+            if (appState.viewMode === 'assign') {
+                const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
+                const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
+                newObj.ox = cx + (newObj.x - cx) / ASSIGN_SCALE;
+                newObj.oy = cy + (newObj.y - cy) / ASSIGN_SCALE;
+            }
+
             if(!isBatch) {
                 renderAll();
                 saveToLocal();
@@ -578,10 +678,12 @@
         function deleteObject(id) {
             if(!confirm('確定刪除？')) return;
             recordState();
-            guests.forEach(g => { if(g.tableId === id) g.tableId = null; });
             
-            // If deleting a selected object, delete all selected
-            const idsToDelete = (appState.selectedIds.includes(id)) ? appState.selectedIds : [id];
+            // Determine IDs to delete (handle batch delete via selection or single delete)
+            const idsToDelete = (id && appState.selectedIds.includes(id)) ? appState.selectedIds : (id ? [id] : appState.selectedIds);
+            if(idsToDelete.length === 0) return;
+
+            guests.forEach(g => { if(idsToDelete.includes(g.tableId)) g.tableId = null; });
             mapObjects = mapObjects.filter(o => !idsToDelete.includes(o.id));
             appState.selectedIds = [];
             updateSelectionVisuals();
@@ -594,6 +696,34 @@
         function renderMap() {
             const container = document.getElementById('transformLayer');
             container.innerHTML = '';
+
+            // --- Draw Center Marker ---
+            let cx = 0, cy = 0, showMarker = false;
+            if (appState.viewMode === 'assign') {
+                if (appState.scaleOrigin) {
+                    cx = appState.scaleOrigin.x;
+                    cy = appState.scaleOrigin.y;
+                    showMarker = true;
+                }
+            } else {
+                // Layout mode: Calculate dynamic center
+                if (mapObjects.length > 0) {
+                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                    mapObjects.forEach(o => {
+                        minX = Math.min(minX, o.x); maxX = Math.max(maxX, o.x + o.width);
+                        minY = Math.min(minY, o.y); maxY = Math.max(maxY, o.y + o.height);
+                    });
+                    if (minX !== Infinity) { cx = (minX + maxX) / 2; cy = (minY + maxY) / 2; showMarker = true; }
+                }
+            }
+
+            if (showMarker) {
+                const marker = document.createElement('div');
+                marker.className = 'center-marker';
+                marker.style.left = cx + 'px'; marker.style.top = cy + 'px';
+                marker.innerHTML = '<span class="center-marker-label">縮放中心</span>';
+                container.appendChild(marker);
+            }
 
             mapObjects.forEach(obj => {
                 const el = document.createElement('div');
@@ -701,10 +831,12 @@
             let isDragging = false;
             let startX, startY;
             let initialPos = {}; // Store initial positions for all selected objects
+            let dragElements = {}; // Cache DOM elements for performance
             let preDragState = null; // Snapshot for undo
 
             el.addEventListener('mousedown', e => {
                 if (e.target.closest('.guest-chip') || e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+                if (appState.isSpaceDown) return; // Allow bubble to canvas for panning
                 e.stopPropagation();
 
                 // Selection Logic
@@ -728,10 +860,17 @@
                 appState.selectedIds.forEach(id => {
                     const o = mapObjects.find(i => i.id === id);
                     if(o) initialPos[id] = { x: o.x, y: o.y };
+
+                    // Cache element and disable transition forcefully
+                    const elRef = document.getElementById(id);
+                    if(elRef) {
+                        dragElements[id] = elRef;
+                        elRef.style.setProperty('transition', 'none', 'important');
+                        elRef.style.zIndex = 100;
+                    }
                 });
                 
                 preDragState = JSON.stringify({ mapObjects, guests }); // Capture state before move
-                el.style.zIndex = 100;
             });
 
             window.addEventListener('mousemove', e => {
@@ -767,7 +906,7 @@
                 // Move ALL selected objects
                 appState.selectedIds.forEach(id => {
                     const o = mapObjects.find(i => i.id === id);
-                    const elRef = document.getElementById(id);
+                    const elRef = dragElements[id]; // Use cached element
                     if (o && initialPos[id] && elRef) {
                         o.x = initialPos[id].x + dx;
                         o.y = initialPos[id].y + dy;
@@ -781,6 +920,20 @@
                 if(isDragging) { 
                     isDragging=false; 
                     el.style.zIndex=''; 
+                    
+                    // Update ox/oy if moved in Assign Mode
+                    if (appState.viewMode === 'assign') {
+                         const cx = appState.scaleOrigin ? appState.scaleOrigin.x : 0;
+                         const cy = appState.scaleOrigin ? appState.scaleOrigin.y : 0;
+                         appState.selectedIds.forEach(id => {
+                            const o = mapObjects.find(i => i.id === id);
+                            if (o) { 
+                                o.ox = cx + (o.x - cx) / ASSIGN_SCALE; 
+                                o.oy = cy + (o.y - cy) / ASSIGN_SCALE; 
+                            }
+                         });
+                    }
+
                     // Only record history if actually moved
                     if (Math.abs(e.clientX - startX) > 2 || Math.abs(e.clientY - startY) > 2) {
                         historyStack.push(preDragState); // Push the PRE-DRAG state to undo stack
@@ -880,20 +1033,24 @@
             let isPanning = false, startX = 0, startY = 0;
             let initialPanX = 0, initialPanY = 0;
             let isSelecting = false, selStartX = 0, selStartY = 0;
+            let canvasRect = null;
 
             canvas.addEventListener('mousedown', e => {
                 if(e.target === canvas || e.target.id === 'transformLayer') {
-                    if (appState.toolMode === 'pan' || (appState.toolMode === 'select' && e.button === 1)) {
+                    if (appState.toolMode === 'pan' || (appState.toolMode === 'select' && e.button === 1) || appState.isSpaceDown) {
                         // Pan Mode
                         isPanning = true; startX = e.clientX - appState.panX; startY = e.clientY - appState.panY;
                         initialPanX = appState.panX; initialPanY = appState.panY;
                         canvas.style.cursor = 'grabbing';
-                    } else if (appState.toolMode === 'select' && !appState.locked) {
+                    } else if (appState.toolMode === 'select' && !appState.locked && !appState.isSpaceDown) {
                         // Select Mode (Marquee)
                         isSelecting = true;
-                        selStartX = e.clientX; selStartY = e.clientY;
+                        canvasRect = canvas.getBoundingClientRect();
+                        selStartX = e.clientX - canvasRect.left; 
+                        selStartY = e.clientY - canvasRect.top;
+                        
                         marquee.style.display = 'block';
-                        marquee.style.left = e.clientX + 'px'; marquee.style.top = e.clientY + 'px';
+                        marquee.style.left = selStartX + 'px'; marquee.style.top = selStartY + 'px';
                         marquee.style.width = '0px'; marquee.style.height = '0px';
                         
                         // Clear selection if not holding shift
@@ -907,7 +1064,8 @@
             window.addEventListener('mousemove', e => {
                 if(isPanning) { appState.panX = e.clientX - startX; appState.panY = e.clientY - startY; updateTransform(); }
                 if(isSelecting) {
-                    const currentX = e.clientX; const currentY = e.clientY;
+                    const currentX = e.clientX - canvasRect.left; 
+                    const currentY = e.clientY - canvasRect.top;
                     const left = Math.min(selStartX, currentX);
                     const top = Math.min(selStartY, currentY);
                     const width = Math.abs(currentX - selStartX);
@@ -923,7 +1081,10 @@
                 }
                 if(isSelecting) {
                     isSelecting = false; marquee.style.display = 'none';
-                    finishSelection(selStartX, selStartY, e.clientX, e.clientY, e.shiftKey);
+                    const currentX = e.clientX - canvasRect.left;
+                    const currentY = e.clientY - canvasRect.top;
+                    finishSelection(selStartX, selStartY, currentX, currentY, e.shiftKey);
+                    canvasRect = null;
                 }
             });
             canvas.addEventListener('wheel', e => {
