@@ -48,10 +48,8 @@
     <div id="seatModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center backdrop-blur-sm" onclick="closeSeatModal()">
         <div class="bg-white p-4 rounded-xl w-[90%] max-w-sm relative shadow-2xl flex flex-col" onclick="event.stopPropagation()">
             <button onclick="closeSeatModal()" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100"><i class="fa-solid fa-times"></i></button>
-            <div class="text-center font-bold text-lg mb-2 text-gray-800" id="modalTitle">座位圖</div>
-            <div class="text-center text-xs font-bold text-blue-500 mb-1"><i class="fa-solid fa-chevron-up"></i> 舞台 STAGE</div>
-            <div id="modalSvgBox" class="w-full aspect-square bg-slate-50 rounded-full border border-slate-200 relative overflow-hidden"></div>
-            <div class="text-center text-xs font-bold text-gray-400 mt-1">入口 ENTRANCE <i class="fa-solid fa-chevron-down"></i></div>
+            <div class="text-center font-bold text-lg mb-2 text-gray-800 hidden" id="modalTitle">座位圖</div>
+            <div id="modalSvgBox" class="w-full aspect-square bg-slate-50 rounded-xl border border-slate-200 relative overflow-hidden"></div>
         </div>
     </div>
     <script>
@@ -248,14 +246,14 @@
             
             const box = document.getElementById('modalSvgBox');
             const capacity = obj.capacity || 10;
-            const r = 100; // Main circle radius
+            const r = 110; // Main circle radius
             const seatR = 22;
-            const orbitR = 135;
-            const center = 160; // SVG center (320x320)
+            const orbitR = 165;
+            const center = 300; // SVG center (600x600)
             
-            let svgContent = `<svg viewBox="0 0 320 320" style="width:100%;height:100%">`;
+            let svgContent = `<svg viewBox="0 0 600 600" style="width:100%;height:100%">`;
             svgContent += `<circle cx="${center}" cy="${center}" r="${r}" fill="white" stroke="#cbd5e1" stroke-width="2" />`;
-            svgContent += `<text x="${center}" y="${center}" font-size="20" fill="#334155">${obj.name}</text>`;
+            svgContent += `<text x="${center}" y="${center}" font-size="24" fill="#334155">${obj.name}</text>`;
             
             for(let i=0; i<capacity; i++) {
                 const angle = (i * (360 / capacity)) - 90;
@@ -268,6 +266,35 @@
                 if(guest) svgContent += `<text x="${sx}" y="${sy}" font-size="10" fill="#1e40af">${guest.name.substr(0,3)}</text>`;
                 else svgContent += `<text x="${sx}" y="${sy}" font-size="9" fill="#cbd5e1">${i+1}</text>`;
             }
+
+            // Auto-detect Stage & Entrance Direction
+            const tCx = obj.x + obj.w/2;
+            const tCy = obj.y + obj.h/2;
+
+            data.objects.forEach(o => {
+                if(o.id === obj.id) return;
+                if(o.type !== 'stage' && o.type !== 'label') return;
+
+                const oCx = o.x + o.w/2, oCy = o.y + o.h/2;
+                const angle = Math.atan2(oCy - tCy, oCx - tCx);
+                const deg = angle * 180 / Math.PI;
+                const color = o.type === 'stage' ? '#3b82f6' : '#94a3b8';
+                const label = o.name;
+                
+                // Text position (Radius 280)
+                const rText = 280;
+                const tx = center + rText * Math.cos(angle);
+                const ty = center + rText * Math.sin(angle);
+                
+                // Arrow position (Radius 240)
+                const rArrow = 240;
+                const ax = center + rArrow * Math.cos(angle);
+                const ay = center + rArrow * Math.sin(angle);
+                
+                svgContent += `<g transform="translate(${ax}, ${ay}) rotate(${deg})"><path d="M0,0 L-8,-5 L-8,5 Z" fill="${color}" /></g>`;
+                svgContent += `<text x="${tx}" y="${ty}" font-size="14" fill="${color}" font-weight="bold">${label}</text>`;
+            });
+
             svgContent += `</svg>`;
             box.innerHTML = svgContent;
             document.getElementById('seatModal').classList.remove('hidden');
