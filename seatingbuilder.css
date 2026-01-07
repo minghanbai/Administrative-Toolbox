@@ -70,7 +70,7 @@ body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; }
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 .seat-spot { transition: all 0.2s; }
-.seat-spot:hover { transform: scale(1.2); border-color: #3b82f6; background-color: #eff6ff; z-index: 10; }
+.seat-spot:hover, .seat-spot.drag-over { transform: scale(1.2); border-color: #3b82f6; background-color: #eff6ff; z-index: 10; }
 
 /* Objects */
 .obj-stage {

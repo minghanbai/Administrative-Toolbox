@@ -43,17 +43,6 @@
                 <button onclick="setTool('pan')" id="btn-tool-pan" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-200 transition" title="拖曳畫布"><i class="fa-solid fa-hand"></i></button>
             </div>
 
-            <!-- Step Navigation -->
-            <div class="flex bg-gray-100 p-1 rounded-lg border border-gray-200 mr-2">
-                <button onclick="setStep(1)" id="step-btn-1" class="step-btn px-3 py-1 text-xs font-bold rounded transition text-gray-500 hover:bg-gray-200">1. 佈置</button>
-                <div class="w-[1px] bg-gray-300 my-1 mx-1"></div>
-                <button onclick="setStep(2)" id="step-btn-2" class="step-btn px-3 py-1 text-xs font-bold rounded transition text-gray-500 hover:bg-gray-200">2. 排桌</button>
-                <div class="w-[1px] bg-gray-300 my-1 mx-1"></div>
-                <button onclick="setStep(3)" id="step-btn-3" class="step-btn px-3 py-1 text-xs font-bold rounded transition text-gray-500 hover:bg-gray-200">3. 排座</button>
-                <div class="w-[1px] bg-gray-300 my-1 mx-1"></div>
-                <button onclick="setStep(4)" id="step-btn-4" class="step-btn px-3 py-1 text-xs font-bold rounded transition text-gray-500 hover:bg-gray-200">4. 輸出</button>
-            </div>
-
             <div class="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200 mr-2">
                 <button onclick="zoomOut()" class="w-8 h-8 hover:bg-white rounded text-gray-600"><i class="fa-solid fa-minus"></i></button>
                 <span id="zoomLevelDisplay" class="text-xs font-mono w-10 text-center text-gray-500">100%</span>
@@ -97,6 +86,13 @@
 
     <div class="flex flex-1 overflow-hidden">
         <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 flex-shrink-0">
+            <!-- Sidebar Tabs -->
+            <div class="flex border-b border-gray-200 bg-gray-50">
+                <button onclick="setStep(1)" id="tab-step-1" class="step-tab flex-1 py-3 text-xs font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent transition">1.佈置</button>
+                <button onclick="setStep(2)" id="tab-step-2" class="step-tab flex-1 py-3 text-xs font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent transition">2.排桌</button>
+                <button onclick="setStep(3)" id="tab-step-3" class="step-tab flex-1 py-3 text-xs font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent transition">3.排座</button>
+            </div>
+
             <!-- Step 2: Assign Mode (Global Guest List) -->
             <div id="panel-step-2" class="hidden flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b bg-white shadow-sm z-10">

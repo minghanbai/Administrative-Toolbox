@@ -36,17 +36,29 @@
             <div class="absolute top-2 right-2 z-10">
                 <button onclick="resetZoom()" class="bg-white/90 px-3 py-1 rounded-full shadow text-sm font-bold text-gray-700 hover:bg-gray-100"><i class="fa-solid fa-expand"></i> 全景</button>
             </div>
+            <div id="btn-view-seats" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden">
+                <button onclick="openSeatModal()" class="bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg font-bold text-sm hover:bg-blue-700 transition flex items-center gap-2 animate-bounce"><i class="fa-solid fa-chair"></i> 查看座位</button>
+            </div>
             <div id="svg-container"></div>
         </div>
         <div class="bg-white p-4" id="results">
             <div class="text-center text-gray-400 mt-10">請搜尋</div>
         </div>
     </div>
+    <div id="seatModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center backdrop-blur-sm" onclick="closeSeatModal()">
+        <div class="bg-white p-4 rounded-xl w-[90%] max-w-sm relative shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+            <button onclick="closeSeatModal()" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100"><i class="fa-solid fa-times"></i></button>
+            <div class="text-center font-bold text-lg mb-2 text-gray-800" id="modalTitle">座位圖</div>
+            <div class="text-center text-xs font-bold text-blue-500 mb-1"><i class="fa-solid fa-chevron-up"></i> 舞台 STAGE</div>
+            <div id="modalSvgBox" class="w-full aspect-square bg-slate-50 rounded-full border border-slate-200 relative overflow-hidden"></div>
+            <div class="text-center text-xs font-bold text-gray-400 mt-1">入口 ENTRANCE <i class="fa-solid fa-chevron-down"></i></div>
+        </div>
+    </div>
     <script>
         const data = {{DATA_JSON}};
         const svgBox = document.getElementById('svg-container');
         const viewBox = "{{VIEWBOX}}";
-        let currentScale = 1, panX = 0, panY = 0, isPan = false, startP = {x: 0, y: 0}, initialDist = 0, startScale = 1;
+        let currentScale = 1, panX = 0, panY = 0, isPan = false, startP = {x: 0, y: 0}, initialDist = 0, startScale = 1, currentTableId = null;
         
         let svg = `<svg id="mainSvg" viewBox="${viewBox}" style="width:100%;height:100%;transition:transform 0.1s">`;
         
@@ -131,6 +143,7 @@
 
         function resetMap() {
             document.querySelectorAll('.seat-active').forEach(e => e.classList.remove('seat-active'));
+            document.getElementById('btn-view-seats').style.display = 'none';
             resetZoom()
         }
 
@@ -204,6 +217,10 @@
         function zoomToTable(tid) {
             const obj = data.objects.find(o => o.id === tid);
             if (!obj) return;
+            currentTableId = tid;
+            
+            const hasSeats = data.guests.some(g => g.tableId === tid && g.seatIndex !== undefined);
+            document.getElementById('btn-view-seats').style.display = hasSeats ? 'block' : 'none';
             
             const vb = viewBox.split(' ').map(Number);
             const vbX = vb[0], vbY = vb[1], vbW = vb[2], vbH = vb[3];
@@ -222,6 +239,43 @@
             panX = -dx * currentScale;
             panY = -dy * currentScale;
             updateT();
+        }
+
+        function openSeatModal() {
+            const obj = data.objects.find(o => o.id === currentTableId);
+            if(!obj) return;
+            document.getElementById('modalTitle').innerText = obj.name;
+            
+            const box = document.getElementById('modalSvgBox');
+            const capacity = obj.capacity || 10;
+            const r = 100; // Main circle radius
+            const seatR = 22;
+            const orbitR = 135;
+            const center = 160; // SVG center (320x320)
+            
+            let svgContent = `<svg viewBox="0 0 320 320" style="width:100%;height:100%">`;
+            svgContent += `<circle cx="${center}" cy="${center}" r="${r}" fill="white" stroke="#cbd5e1" stroke-width="2" />`;
+            svgContent += `<text x="${center}" y="${center}" font-size="20" fill="#334155">${obj.name}</text>`;
+            
+            for(let i=0; i<capacity; i++) {
+                const angle = (i * (360 / capacity)) - 90;
+                const rad = angle * Math.PI / 180;
+                const sx = center + orbitR * Math.cos(rad);
+                const sy = center + orbitR * Math.sin(rad);
+                const guest = data.guests.find(g => g.tableId === obj.id && g.seatIndex === i);
+                
+                svgContent += `<circle cx="${sx}" cy="${sy}" r="${seatR}" fill="${guest?'#eff6ff':'white'}" stroke="${guest?'#3b82f6':'#cbd5e1'}" stroke-width="1.5" />`;
+                if(guest) svgContent += `<text x="${sx}" y="${sy}" font-size="10" fill="#1e40af">${guest.name.substr(0,3)}</text>`;
+                else svgContent += `<text x="${sx}" y="${sy}" font-size="9" fill="#cbd5e1">${i+1}</text>`;
+            }
+            svgContent += `</svg>`;
+            box.innerHTML = svgContent;
+            document.getElementById('seatModal').classList.remove('hidden');
+            document.getElementById('seatModal').classList.add('flex');
+        }
+        function closeSeatModal() {
+            document.getElementById('seatModal').classList.add('hidden');
+            document.getElementById('seatModal').classList.remove('flex');
         }
     </script>
 </body>

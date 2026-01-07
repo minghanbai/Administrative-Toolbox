@@ -15,7 +15,7 @@ const SIZES = {
     },
     'main-table': {
         assign: { w: 300, h: 300 }, // Main Table (Extra Large)
-        seating: { w: 200, h: 200 },
+        seating: { w: 300, h: 300 },
         layout: { w: 120, h: 120 }  // Main Table (Medium Circle)
     }
 };
@@ -146,15 +146,15 @@ function setTool(mode) {
 function setStep(step) {
     appState.currentStep = step;
     
-    // Update UI Buttons
-    document.querySelectorAll('.step-btn').forEach(b => {
-        b.classList.remove('shadow', 'bg-white', 'text-blue-600');
-        b.classList.add('text-gray-500', 'hover:bg-gray-200');
+    // Update UI Tabs
+    document.querySelectorAll('.step-tab').forEach(b => {
+        b.classList.remove('text-blue-600', 'border-blue-600', 'bg-white');
+        b.classList.add('text-gray-500', 'border-transparent');
     });
-    const activeBtn = document.getElementById(`step-btn-${step}`);
-    if(activeBtn) {
-        activeBtn.classList.add('shadow', 'bg-white', 'text-blue-600');
-        activeBtn.classList.remove('text-gray-500', 'hover:bg-gray-200');
+    const activeTab = document.getElementById(`tab-step-${step}`);
+    if(activeTab) {
+        activeTab.classList.add('text-blue-600', 'border-blue-600', 'bg-white');
+        activeTab.classList.remove('text-gray-500', 'border-transparent');
     }
 
     // Toggle Sidebar Panels based on Step
@@ -174,10 +174,6 @@ function setStep(step) {
         setViewMode('seating');
         document.getElementById('panel-step-3').classList.remove('hidden');
         renderSeatingPanel(); // Initial render
-    } else if (step === 4) {
-        setViewMode('assign'); // Preview in Assign mode
-        document.getElementById('panel-step-2').classList.remove('hidden'); // Show global list for review
-        toggleMenu(); // Open menu for export
     }
 }
 
@@ -332,7 +328,7 @@ function loadFromLocal() {
                 
                 // Restore Step based on saved viewMode or default to 2
                 let step = 2;
-                if (data.appState.currentStep) step = data.appState.currentStep;
+                if (data.appState.currentStep && data.appState.currentStep <= 3) step = data.appState.currentStep;
                 setStep(step);
 
                 if(data.appState.toolMode) setTool(data.appState.toolMode);
@@ -484,15 +480,15 @@ function renderMap() {
                 el.innerHTML = `
                     <div class="flex flex-col items-center justify-center h-full pointer-events-none" onclick="openModal('${obj.id}')">
                         <span class="font-bold ${isMain ? 'text-red-800' : 'text-gray-700'} text-sm leading-none">${obj.name}</span>
-                        ${!isMain ? `<span class="text-[10px] text-orange-600 font-bold bg-orange-100 px-1 rounded mt-1">${seatedCount}人</span>` : ''}
+                        <span class="text-[10px] ${isMain ? 'text-red-600 bg-red-100' : 'text-orange-600 bg-orange-100'} font-bold px-1 rounded mt-1">${seatedCount}人</span>
                     </div>
                     ${!appState.locked ? `<button onclick="deleteObject('${obj.id}')" class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] hover:scale-110 pointer-events-auto">×</button>`:''}
                 `;
             } else if (isSeating) {
                 // Seating Mode (Medium Circle + Satellites)
                 const r = obj.width / 2;
-                const seatR = 20; // Radius of seat circle
-                const orbitR = r + 25; // Distance from center
+                const seatR = 22; // Radius of seat circle
+                const orbitR = r + 30; // Distance from center
                 const capacity = obj.capacity || 10;
                 
                 let seatsHtml = '';
@@ -504,13 +500,19 @@ function renderMap() {
                     
                     // Find guest at this seat
                     const guestAtSeat = guests.find(g => g.tableId === obj.id && g.seatIndex === i);
+                    // Move title to wrapper for better UX (since inner has pointer-events-none)
+                    const seatTitle = guestAtSeat ? guestAtSeat.name : `座位 ${i+1}`;
                     const seatContent = guestAtSeat 
-                        ? `<div class="w-full h-full rounded-full bg-blue-100 border-2 border-blue-500 flex items-center justify-center text-[8px] overflow-hidden text-center leading-none p-0.5" title="${guestAtSeat.name}">${guestAtSeat.name.substr(0,2)}</div>`
-                        : `<div class="text-[8px] text-gray-300">${i+1}</div>`;
+                        ? `<div class="w-full h-full rounded-full bg-blue-100 border-2 border-blue-500 flex items-center justify-center text-[10px] font-bold overflow-hidden text-center leading-none p-0.5 pointer-events-none">${guestAtSeat.name.substr(0,3)}</div>`
+                        : `<div class="text-[10px] text-gray-300 pointer-events-none">${i+1}</div>`;
 
-                    seatsHtml += `<div class="seat-spot absolute rounded-full border border-gray-300 bg-white flex items-center justify-center shadow-sm" 
+                    seatsHtml += `<div class="seat-spot absolute rounded-full border border-gray-300 bg-white flex items-center justify-center shadow-sm transition-colors" 
                         style="left:${sx}px; top:${sy}px; width:${seatR*2}px; height:${seatR*2}px;"
-                        ondrop="dropGuest(event, '${obj.id}', ${i})" ondragover="event.preventDefault()">
+                        title="${seatTitle}"
+                        ondrop="dropGuest(event, '${obj.id}', ${i})" 
+                        ondragover="event.preventDefault(); event.stopPropagation()"
+                        ondragenter="this.classList.add('drag-over'); event.stopPropagation()"
+                        ondragleave="this.classList.remove('drag-over'); event.stopPropagation()">
                         ${seatContent}
                     </div>`;
                 }
@@ -788,6 +790,7 @@ function createGuestElement(g, seated) {
 
 function dropGuest(ev, tableId, seatIndex = undefined) {
     ev.preventDefault();
+    ev.stopPropagation(); // 關鍵修正：阻止事件冒泡到桌子，避免座位設定被覆蓋
     recordState();
     document.querySelectorAll('.drag-over').forEach(e => e.classList.remove('drag-over'));
     const gid = ev.dataTransfer.getData('gid');
@@ -876,8 +879,16 @@ function setupCanvasEvents() {
     });
     let zoomTimeout;
     canvas.addEventListener('wheel', e => {
-        e.preventDefault(); const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        appState.scale = Math.max(0.1, Math.min(5, appState.scale * delta)); updateTransform();
+        e.preventDefault(); 
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left - rect.width / 2;
+        const my = e.clientY - rect.top - rect.height / 2;
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newScale = Math.max(0.1, Math.min(5, appState.scale * delta));
+        appState.panX = mx - (mx - appState.panX) * (newScale / appState.scale);
+        appState.panY = my - (my - appState.panY) * (newScale / appState.scale);
+        appState.scale = newScale;
+        updateTransform();
         clearTimeout(zoomTimeout);
         zoomTimeout = setTimeout(saveToLocal, 500);
     });
@@ -1039,8 +1050,37 @@ function updateTransform() {
     document.getElementById('transformLayer').style.transform = `translate(${appState.panX}px, ${appState.panY}px) scale(${appState.scale})`;
     document.getElementById('zoomLevelDisplay').innerText = Math.round(appState.scale * 100) + '%';
 }
-function zoomIn() { appState.scale *= 1.2; updateTransform(); saveToLocal(); }
-function zoomOut() { appState.scale *= 0.8; updateTransform(); saveToLocal(); }
+function zoomIn() { zoomWithFocus(1.2); }
+function zoomOut() { zoomWithFocus(0.8); }
+
+function zoomWithFocus(factor) {
+    let cx = 0, cy = 0; // Default to viewport center
+    
+    // If selection exists, zoom towards selection center
+    if (appState.selectedIds.length > 0) {
+        const selected = mapObjects.filter(o => appState.selectedIds.includes(o.id));
+        if (selected.length > 0) {
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            selected.forEach(o => {
+                minX = Math.min(minX, o.x);
+                maxX = Math.max(maxX, o.x + o.width);
+                minY = Math.min(minY, o.y);
+                maxY = Math.max(maxY, o.y + o.height);
+            });
+            const wx = (minX + maxX) / 2;
+            const wy = (minY + maxY) / 2;
+            cx = appState.panX + wx * appState.scale;
+            cy = appState.panY + wy * appState.scale;
+        }
+    }
+    const newScale = Math.max(0.1, Math.min(5, appState.scale * factor));
+    appState.panX = cx - (cx - appState.panX) * (newScale / appState.scale);
+    appState.panY = cy - (cy - appState.panY) * (newScale / appState.scale);
+    appState.scale = newScale;
+    updateTransform();
+    saveToLocal();
+}
+
 function autoFitZoom() {
     if(mapObjects.length === 0) return;
     const xs = mapObjects.map(o => o.x); const ys = mapObjects.map(o => o.y);
@@ -1293,9 +1333,10 @@ async function exportWebPackage(mode = 'single') {
             y: Math.round(o.oy !== undefined ? o.oy : o.y),
             w: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.width),
             h: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.height),
+            capacity: o.capacity,
             name: o.name
         })),
-        guests: guests.filter(g => g.tableId).map(g => ({ unit: g.unit, name: g.name, count: g.count, tableId: g.tableId }))
+        guests: guests.filter(g => g.tableId).map(g => ({ unit: g.unit, name: g.name, count: g.count, tableId: g.tableId, seatIndex: g.seatIndex }))
     };
 
     const xs = exportData.objects.map(o => o.x); const ys = exportData.objects.map(o => o.y);
@@ -1326,12 +1367,13 @@ async function exportWebPackage(mode = 'single') {
             if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded.');
 
             // 1. Generate CSV
-            let csvContent = "\uFEFF桌號,單位,姓名,人數\n";
+            let csvContent = "\uFEFF桌號,單位,姓名,人數,座位號\n";
             exportData.guests.forEach(g => {
                 const table = exportData.objects.find(o => o.id === g.tableId);
                 const tableName = table ? table.name : "Unknown";
                 const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
-                csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count}\n`;
+                const seatIdx = g.seatIndex !== undefined ? g.seatIndex : '';
+                csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count},${seatIdx}\n`;
             });
 
             // 2. Generate Layout JSON
@@ -1353,8 +1395,9 @@ async function exportWebPackage(mode = 'single') {
                     var parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(function(s){ return s.replace(/^"|"$/g, '').trim(); });
                     if(parts.length>=3){
                         var tName = parts[0], unit = parts[1], name = parts[2], cnt = parseInt(parts[3])||1;
+                        var sIdx = parts[4] ? parseInt(parts[4]) : undefined;
                         var table = data.objects.find(function(o){ return o.name === tName; });
-                        if(table) guests.push({ unit: unit, name: name, count: cnt, tableId: table.id });
+                        if(table) guests.push({ unit: unit, name: name, count: cnt, tableId: table.id, seatIndex: isNaN(sIdx)?undefined:sIdx });
                     }
                 }
                 data.guests = guests;
@@ -1395,12 +1438,13 @@ async function exportWebPackage(mode = 'single') {
 function exportCSVOnly() {
     if(guests.length === 0) return alert('無名單');
     
-    let csvContent = "\uFEFF桌號,單位,姓名,人數\n";
+    let csvContent = "\uFEFF桌號,單位,姓名,人數,座位號\n";
     guests.forEach(g => {
         const table = mapObjects.find(o => o.id === g.tableId);
         const tableName = table ? table.name : "Unknown";
         const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
-        csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count}\n`;
+        const seatIdx = g.seatIndex !== undefined ? g.seatIndex : '';
+        csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count},${seatIdx}\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
