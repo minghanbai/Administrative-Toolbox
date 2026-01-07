@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <style>
         body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; }
@@ -161,11 +162,36 @@
                 <button onclick="autoFitZoom()" class="px-2 h-8 hover:bg-white rounded text-gray-600 text-xs font-bold"><i class="fa-solid fa-expand"></i></button>
             </div>
 
-            <button onclick="resetData()" class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded text-sm transition" title="清空"><i class="fa-solid fa-trash-can"></i></button>
-            <div class="h-6 w-[1px] bg-gray-300 mx-1"></div>
-            <button onclick="exportExcel()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Excel</button>
-            <button onclick="exportPDF()" id="btn-export-pdf" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-            <button onclick="exportWebPackage()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-globe"></i> 打包網頁</button>
+            <!-- Menu Dropdown -->
+            <div class="relative">
+                <button onclick="toggleMenu()" id="btn-menu" class="bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded shadow text-sm font-bold flex items-center gap-2 transition">
+                    <i class="fa-solid fa-bars"></i> 選單
+                </button>
+                <div id="mainMenu" class="hidden absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50 transform origin-top-right transition-all">
+                    <div class="px-4 py-2 text-xs font-bold text-gray-400 border-b border-gray-100 bg-gray-50">專案管理</div>
+                    <button onclick="exportProject()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-download w-4 text-center"></i> 儲存專案 (.json)
+                    </button>
+                    <button onclick="document.getElementById('importInput').click()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-upload w-4 text-center"></i> 載入專案 (.json)
+                    </button>
+                    
+                    <div class="px-4 py-2 text-xs font-bold text-gray-400 border-b border-gray-100 bg-gray-50 mt-1">輸出</div>
+                    <button onclick="exportExcel()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-excel w-4 text-center text-green-600"></i> 匯出 Excel</button>
+                    <button onclick="exportCSVOnly()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-csv w-4 text-center text-green-600"></i> 匯出 CSV (更新用)</button>
+                    <button onclick="exportPDF()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-pdf w-4 text-center text-red-600"></i> 匯出 PDF</button>
+                    <button onclick="exportWebPackage('single')" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-globe w-4 text-center text-indigo-600"></i> 打包網頁 (單檔)
+                    </button>
+                    <button onclick="exportWebPackage('split')" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-folder-open w-4 text-center text-indigo-600"></i> 打包網頁 (分離+CSV)
+                    </button>
+                    
+                    <div class="border-t border-gray-100 mt-1"></div>
+                    <button onclick="resetData()" class="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"><i class="fa-solid fa-trash-can w-4 text-center"></i> 清空重置</button>
+                </div>
+            </div>
+            <input type="file" id="importInput" accept=".json" class="hidden" onchange="importProject(this)">
         </div>
     </header>
 
@@ -1321,6 +1347,64 @@
             document.getElementById('btn-'+t).classList.add('border-blue-600', 'bg-blue-50', 'text-blue-600');
         }
 
+        // --- Menu & Project Management ---
+        function toggleMenu() {
+            const menu = document.getElementById('mainMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        // Close menu when clicking outside
+        window.addEventListener('click', (e) => {
+            const menu = document.getElementById('mainMenu');
+            const btn = document.getElementById('btn-menu');
+            if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+
+        function exportProject() {
+            const data = {
+                version: "1.0",
+                timestamp: new Date().toISOString(),
+                mapObjects,
+                guests,
+                appState: { ...appState, selectedIds: [], toolMode: 'select' }
+            };
+            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `座位專案_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            document.getElementById('mainMenu').classList.add('hidden');
+        }
+
+        function importProject(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (Array.isArray(data.mapObjects) && Array.isArray(data.guests)) {
+                        if(confirm('載入專案將會覆蓋目前的進度，確定嗎？')) {
+                            recordState(); // Save history
+                            mapObjects = data.mapObjects;
+                            guests = data.guests;
+                            if (data.appState && data.appState.viewMode) setViewMode(data.appState.viewMode, true);
+                            renderAll(); updateStats(); autoFitZoom(); saveToLocal();
+                            alert('專案載入成功！');
+                        }
+                    } else { alert('檔案格式錯誤：找不到必要的資料欄位'); }
+                } catch (err) { console.error(err); alert('讀取失敗：' + err.message); }
+                input.value = ''; // Reset input
+                document.getElementById('mainMenu').classList.add('hidden');
+            };
+            reader.readAsText(file);
+        }
+
         // --- Export Excel ---
         function exportExcel() {
             if(guests.length === 0) return alert('無名單');
@@ -1436,7 +1520,7 @@
         }
 
         // --- Export Web Package (Small Circle Mode Forced) ---
-        async function exportWebPackage() {
+        async function exportWebPackage(mode = 'single') {
             if(mapObjects.length === 0) return alert('場地是空的');
 
             // Force prepare data as if we are in layout mode (small circles)
@@ -1470,21 +1554,108 @@
                 if (!response.ok) throw new Error('無法讀取範本檔案 (template/search_template.html)');
                 let htmlContent = await response.text();
 
-                htmlContent = htmlContent.replace('{{DATA_JSON}}', JSON.stringify(exportData));
-                htmlContent = htmlContent.replace('{{VIEWBOX}}', viewBox);
-                htmlContent = htmlContent.replace('{{UPDATE_DATE}}', exportData.date);
+                if (mode === 'single') {
+                    // Mode 1: Single File (Embed Everything)
+                    htmlContent = htmlContent.replace('{{DATA_JSON}}', JSON.stringify(exportData));
+                    htmlContent = htmlContent.replace('{{VIEWBOX}}', viewBox);
+                    htmlContent = htmlContent.replace('{{UPDATE_DATE}}', exportData.date);
 
-                const blob = new Blob([htmlContent], {type: 'text/html'});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `座位查詢系統_${exportData.date}.html`;
-                a.click();
-                URL.revokeObjectURL(url);
+                    const blob = new Blob([htmlContent], {type: 'text/html'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `座位查詢系統_${exportData.date}.html`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Mode 2: Split Package (HTML + JSON + CSV)
+                    if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded.');
+
+                    // 1. Generate CSV
+                    let csvContent = "\uFEFF桌號,單位,姓名,人數\n";
+                    exportData.guests.forEach(g => {
+                        const table = exportData.objects.find(o => o.id === g.tableId);
+                        const tableName = table ? table.name : "Unknown";
+                        const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
+                        csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count}\n`;
+                    });
+
+                    // 2. Generate Layout JSON
+                    const layoutData = { ...exportData, guests: [] };
+
+                    // 3. Generate HTML with Loader Script
+                    const loaderScript = `(function(){ try {
+                        var xhr = new XMLHttpRequest();
+                        xhr.open('GET', 'layout.json', false); xhr.send(null);
+                        if(xhr.status>=400) throw new Error('Load layout failed');
+                        var data = JSON.parse(xhr.responseText);
+                        xhr.open('GET', 'guests.csv', false); xhr.send(null);
+                        if(xhr.status>=400) throw new Error('Load csv failed');
+                        var lines = xhr.responseText.split(/\\r?\\n/);
+                        var guests = [];
+                        for(var i=1; i<lines.length; i++){
+                            var line = lines[i].trim();
+                            if(!line) continue;
+                            var parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(function(s){ return s.replace(/^"|"$/g, '').trim(); });
+                            if(parts.length>=3){
+                                var tName = parts[0], unit = parts[1], name = parts[2], cnt = parseInt(parts[3])||1;
+                                var table = data.objects.find(function(o){ return o.name === tName; });
+                                if(table) guests.push({ unit: unit, name: name, count: cnt, tableId: table.id });
+                            }
+                        }
+                        data.guests = guests;
+                        return data;
+                    } catch(e){ 
+                        if(window.location.protocol === 'file:') {
+                            alert('【無法讀取資料】\\n\\n您正透過「檔案模式 (file://)」開啟此網頁，瀏覽器基於安全性禁止讀取外部資料檔 (layout.json/guests.csv)。\\n\\n解決方案：\\n1. 請將整包檔案部署至網站伺服器 (Web Server)。\\n2. 或使用 VS Code Live Server 等工具開啟。\\n3. 若無伺服器，請重新打包並選擇「單檔模式」。');
+                        } else {
+                            alert('Data Load Error: '+e.message); 
+                        }
+                        return {objects:[], guests:[]}; } })()`;
+
+                    htmlContent = htmlContent.replace('{{DATA_JSON}}', loaderScript);
+                    htmlContent = htmlContent.replace('{{VIEWBOX}}', viewBox);
+                    htmlContent = htmlContent.replace('{{UPDATE_DATE}}', exportData.date);
+
+                    // 4. Zip It
+                    const zip = new JSZip();
+                    zip.file("index.html", htmlContent);
+                    zip.file("layout.json", JSON.stringify(layoutData, null, 2));
+                    zip.file("guests.csv", csvContent);
+
+                    const blob = await zip.generateAsync({type:"blob"});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `座位系統包_${exportData.date}.zip`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
             } catch (err) {
                 console.error(err);
                 alert('匯出失敗：無法讀取範本檔案。\n請確保 template/search_template.html 存在，且透過 Web Server (http/https) 執行此網頁，而非直接開啟檔案 (file://)。');
             }
+        }
+
+        // --- Export CSV Only ---
+        function exportCSVOnly() {
+            if(guests.length === 0) return alert('無名單');
+            
+            let csvContent = "\uFEFF桌號,單位,姓名,人數\n";
+            guests.forEach(g => {
+                const table = mapObjects.find(o => o.id === g.tableId);
+                const tableName = table ? table.name : "Unknown";
+                const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
+                csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `名單更新_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
         }
     </script>
 </body>

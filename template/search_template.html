@@ -28,14 +28,17 @@
         </div>
         <div class="text-[10px] text-gray-400 text-right mt-1">Update: {{UPDATE_DATE}}</div>
     </div>
-    <div class="flex-grow flex flex-col overflow-hidden relative">
-        <div class="h-[50vh] bg-slate-50 relative border-b overflow-hidden" id="map-wrap">
+    <div class="flex-grow overflow-y-auto relative scroll-smooth" id="main-scroller">
+        <div class="h-[50vh] bg-slate-50 relative border-b overflow-hidden flex-none" id="map-wrap">
+            <div class="absolute top-2 left-2 z-10 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm pointer-events-none select-none">
+                <i class="fa-solid fa-hand-pointer"></i> 雙指縮放 / 單指拖曳
+            </div>
             <div class="absolute top-2 right-2 z-10">
-                <button onclick="resetZoom()" class="bg-white/90 px-3 py-1 rounded-full shadow text-sm font-bold text-gray-700">重置</button>
+                <button onclick="resetZoom()" class="bg-white/90 px-3 py-1 rounded-full shadow text-sm font-bold text-gray-700 hover:bg-gray-100"><i class="fa-solid fa-expand"></i> 全景</button>
             </div>
             <div id="svg-container"></div>
         </div>
-        <div class="flex-grow bg-white p-4 overflow-y-auto" id="results">
+        <div class="bg-white p-4" id="results">
             <div class="text-center text-gray-400 mt-10">請搜尋</div>
         </div>
     </div>
@@ -43,7 +46,7 @@
         const data = {{DATA_JSON}};
         const svgBox = document.getElementById('svg-container');
         const viewBox = "{{VIEWBOX}}";
-        let currentScale = 1, panX = 0, panY = 0, isPan = false, startP = {x: 0, y: 0};
+        let currentScale = 1, panX = 0, panY = 0, isPan = false, startP = {x: 0, y: 0}, initialDist = 0, startScale = 1;
         
         let svg = `<svg id="mainSvg" viewBox="${viewBox}" style="width:100%;height:100%;transition:transform 0.1s">`;
         
@@ -94,6 +97,10 @@
             if (obj) {
                 searchInput.value = obj.name;
                 searchInput.dispatchEvent(new Event('input'))
+                
+                const el = document.getElementById('s-' + tid);
+                if (el) el.classList.add('seat-active');
+                zoomToTable(tid);
             }
         }
 
@@ -130,6 +137,8 @@
             const obj = data.objects.find(o => o.id === tid);
             if (!obj) return;
             document.getElementById('s-' + tid).classList.add('seat-active')
+            document.getElementById('main-scroller').scrollTop = 0;
+            zoomToTable(tid);
         }
         svgBox.addEventListener('wheel', e => {
             e.preventDefault();
@@ -152,6 +161,33 @@
             }
         });
         window.addEventListener('mouseup', () => isPan = false);
+        
+        svgBox.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                isPan = true;
+                startP = { x: e.touches[0].clientX - panX, y: e.touches[0].clientY - panY }
+            } else if (e.touches.length === 2) {
+                isPan = false;
+                initialDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                startScale = currentScale
+            }
+        });
+        svgBox.addEventListener('touchmove', e => {
+            if (isPan && e.touches.length === 1) {
+                e.preventDefault();
+                panX = e.touches[0].clientX - startP.x;
+                panY = e.touches[0].clientY - startP.y;
+                updateT()
+            } else if (e.touches.length === 2) {
+                e.preventDefault();
+                const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                if (initialDist > 0) { currentScale = startScale * (dist / initialDist); updateT() }
+            }
+        });
+        svgBox.addEventListener('touchend', e => {
+            if (e.touches.length < 2) initialDist = 0;
+            if (e.touches.length === 0) isPan = false
+        });
 
         function updateT() {
             svgEl.style.transform = `translate(${panX}px,${panY}px) scale(${currentScale})`
@@ -162,6 +198,29 @@
             panX = 0;
             panY = 0;
             updateT()
+        }
+
+        function zoomToTable(tid) {
+            const obj = data.objects.find(o => o.id === tid);
+            if (!obj) return;
+            
+            const vb = viewBox.split(' ').map(Number);
+            const vbX = vb[0], vbY = vb[1], vbW = vb[2], vbH = vb[3];
+            const contRect = svgBox.getBoundingClientRect();
+            const k = Math.min(contRect.width / vbW, contRect.height / vbH);
+            
+            const objCx = obj.x + obj.w / 2;
+            const objCy = obj.y + obj.h / 2;
+            const vbCx = vbX + vbW / 2;
+            const vbCy = vbY + vbH / 2;
+            
+            const dx = (objCx - vbCx) * k;
+            const dy = (objCy - vbCy) * k;
+            
+            currentScale = 3;
+            panX = -dx * currentScale;
+            panY = -dy * currentScale;
+            updateT();
         }
     </script>
 </body>
