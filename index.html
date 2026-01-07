@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行政百寶箱 (Administrative Toolbox)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .tool-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .tool-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Navbar -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center text-white text-lg">
+                    <i class="fa-solid fa-toolbox"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight text-slate-800">行政百寶箱</h1>
+                    <p class="text-xs text-slate-500">Administrative Toolbox</p>
+                </div>
+            </div>
+            <div>
+                <a href="#" class="text-slate-400 hover:text-slate-600 transition"><i class="fa-brands fa-github text-xl"></i></a>
+            </div>
+        </div>
+    </header>
+
+    <!-- PC User Alert Banner -->
+    <div class="bg-amber-50 border-b border-amber-200 text-amber-800 px-4 py-3 text-sm text-center">
+        <div class="max-w-6xl mx-auto flex items-center justify-center gap-2">
+            <i class="fa-solid fa-desktop"></i>
+            <span class="font-bold">建議使用電腦瀏覽：</span>
+            <span>本系列工具包含大量拖曳與編輯功能，使用滑鼠與大螢幕操作體驗最佳。</span>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-6xl mx-auto px-4 py-10 w-full">
+        
+        <div class="mb-8">
+            <h2 class="text-2xl font-bold text-slate-800 mb-2">工具列表</h2>
+            <p class="text-slate-500">選擇您需要的行政輔助工具以開始工作。</p>
+        </div>
+
+        <!-- Tools Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <!-- Tool 1: Activity Seating Master (Active) -->
+            <a href="seating_tool.html" class="tool-card block bg-white rounded-xl border border-slate-200 overflow-hidden group relative">
+                <div class="absolute top-3 right-3">
+                    <span class="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full">v1.0 可用</span>
+                </div>
+                <div class="h-32 bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center group-hover:from-blue-600 group-hover:to-blue-700 transition">
+                    <i class="fa-solid fa-layer-group text-4xl text-white opacity-90"></i>
+                </div>
+                <div class="p-5">
+                    <h3 class="font-bold text-lg text-slate-800 mb-2 group-hover:text-blue-600 transition">活動排位大師</h3>
+                    <p class="text-sm text-slate-500 mb-4 line-clamp-2">視覺化座位安排工具。支援拖曳排位、自動生成矩陣、賓客名單管理及 Excel/PDF 匯出。</p>
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <span class="bg-slate-100 px-2 py-1 rounded">座位圖</span>
+                        <span class="bg-slate-100 px-2 py-1 rounded">名單管理</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Add New Tool (Framework Placeholder) -->
+            <a href="https://github.com/YourUsername/Administrative-Toolbox" target="_blank" class="border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center p-6 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition cursor-pointer h-full min-h-[300px]">
+                <div class="w-12 h-12 rounded-full bg-slate-100 mb-3 flex items-center justify-center group-hover:bg-white transition">
+                    <i class="fa-solid fa-plus text-xl"></i>
+                </div>
+                <span class="font-bold text-sm">新增工具模組</span>
+                <span class="text-xs text-slate-400 mt-1">前往 GitHub Repository</span>
+            </a>
+
+        </div>
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-6 mt-auto">
+        <div class="max-w-6xl mx-auto px-4 text-center text-xs text-slate-400">
+            <p>&copy; 2026 Administrative Toolbox. Designed for efficiency.</p>
+        </div>
+    </footer>
+
+</body>
+</html>
+
