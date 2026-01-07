@@ -106,7 +106,8 @@
 
         function renderList(list) {
             if (list.length === 0 && searchInput.value) {
-                resDiv.innerHTML = '<div class="text-center text-gray-400">查無此人</div>';
+                const isTable = data.objects.some(o => o.name === searchInput.value.trim() && (o.type === 'table' || o.type === 'main-table'));
+                resDiv.innerHTML = `<div class="text-center text-gray-400">${isTable ? '此桌目前無安排貴賓' : '查無此人'}</div>`;
                 return
             }
             if (list.length === 0) {

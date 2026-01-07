@@ -1,0 +1,113 @@
+body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; }
+
+#floorCanvas { background-color: #f8fafc; cursor: grab; overflow: hidden; }
+#floorCanvas:active { cursor: grabbing; }
+#transformLayer {
+    transform-origin: 0 0; position: absolute; top: 50%; left: 50%;
+    width: 0; height: 0; overflow: visible;
+}
+/* Infinite Grid & Axes */
+.grid-background {
+    position: absolute; top: -20000px; left: -20000px; width: 40000px; height: 40000px;
+    background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: 20000px 20000px; /* Align grid to 0,0 */
+    pointer-events: none; z-index: -10;
+}
+.axis-line { position: absolute; background: #94a3b8; pointer-events: none; z-index: -5; }
+.axis-x { top: 0; left: -20000px; width: 40000px; height: 2px; }
+.axis-y { left: 0; top: -20000px; height: 40000px; width: 2px; }
+
+/* Center Label */
+.origin-label {
+    position: absolute; top: 2px; left: 4px; font-size: 10px; color: #64748b; pointer-events: none; z-index: -4;
+}
+
+.draggable-item { position: absolute; user-select: none; transition: box-shadow 0.2s; }
+.draggable-item:hover { z-index: 50; }
+
+/* Table Styles - Shared */
+.table-node {
+    background: white; border: 2px solid #cbd5e1;
+    display: flex; flex-direction: column; overflow: visible;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth transition between modes */
+}
+/* Main Table Variant */
+.table-node.type-main {
+    background-color: #fee2e2; border-color: #ef4444; color: #b91c1c;
+}
+.table-node.type-main .guest-chip { border-color: #fca5a5; }
+
+.table-node.drag-over { border-color: #3b82f6; background-color: #eff6ff; }
+
+/* Mode: Assign (Large Rect) */
+.table-node.mode-assign {
+    border-radius: 1rem;
+    overflow: hidden;
+}
+
+/* Mode: Layout (Small Circle) */
+.table-node.mode-layout {
+    border-radius: 50%;
+    border-color: #f97316; /* Orange border like output */
+    background-color: #fff7ed;
+    align-items: center; justify-content: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.table-node.mode-layout.type-main {
+    border-color: #ef4444; background-color: #fee2e2;
+}
+.table-node.mode-layout:hover {
+    transform: scale(1.05);
+    border-color: #ea580c;
+}
+
+/* Mode: Seating (Medium Circle with Satellites) */
+.table-node.mode-seating {
+    border-radius: 50%;
+    background-color: white;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+.seat-spot { transition: all 0.2s; }
+.seat-spot:hover { transform: scale(1.2); border-color: #3b82f6; background-color: #eff6ff; z-index: 10; }
+
+/* Objects */
+.obj-stage {
+    background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;
+    font-weight: bold; border-radius: 4px; opacity: 0.9; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+}
+.obj-label {
+    background: #e2e8f0; border: 1px solid #94a3b8; color: #475569; padding: 5px 15px;
+    border-radius: 999px; font-weight: bold; display: flex; align-items: center; justify-content: center;
+}
+
+.guest-chip { cursor: grab; transition: all 0.2s; user-select: none; }
+.guest-chip:active { cursor: grabbing; transform: scale(1.05); opacity: 0.8; }
+.guest-chip.dragging { opacity: 0.5; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f1f1f1; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+#modalOverlay.hidden { display: none; }
+
+/* Selection & Marquee */
+.selected-obj { outline: 2px solid #3b82f6; outline-offset: 2px; z-index: 60 !important; }
+#selectionMarquee { position: absolute; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.2); display: none; z-index: 9999; pointer-events: none; }
+
+/* Print Styles (Vector PDF) */
+@media print {
+    @page { size: landscape; margin: 5mm; }
+    body { 
+        margin: 0 !important; padding: 0 !important; 
+        width: 100vw; height: 100vh; 
+        display: flex !important; justify-content: center; align-items: center;
+        background: white !important;
+    }
+    body > *:not(#print-container) { display: none !important; }
+    #print-container { display: block !important; width: 297mm; height: 210mm; position: relative; overflow: hidden; }
+    #print-content { position: absolute; top: 50%; left: 50%; transform-origin: center center; }
+    .print-color-adjust {
+        -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    }
+}
