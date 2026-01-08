@@ -1242,7 +1242,7 @@ function exportExcel() {
     });
     seated.concat(unseated).forEach(g => {
         const t = mapObjects.find(o => o.id === g.tableId);
-        data.push({ "桌號": t?t.name:"-", "單位": g.unit, "姓名": g.name, "人數": g.count, "狀態": t?"已入席":"未入席" });
+        data.push({ "桌號": t?t.name:"-", "單位": g.unit, "姓名": g.name, "人數": g.count, "座位號": (g.seatIndex !== undefined ? g.seatIndex + 1 : "-"), "狀態": t?"已入席":"未入席" });
     });
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -1505,7 +1505,7 @@ async function exportWebPackage(mode = 'single') {
                 const table = exportData.objects.find(o => o.id === g.tableId);
                 const tableName = table ? table.name : "Unknown";
                 const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
-                const seatIdx = g.seatIndex !== undefined ? g.seatIndex : '';
+                const seatIdx = g.seatIndex !== undefined ? (g.seatIndex + 1) : '';
                 csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count},${seatIdx}\n`;
             });
 
@@ -1528,7 +1528,7 @@ async function exportWebPackage(mode = 'single') {
                     var parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(function(s){ return s.replace(/^"|"$/g, '').trim(); });
                     if(parts.length>=3){
                         var tName = parts[0], unit = parts[1], name = parts[2], cnt = parseInt(parts[3])||1;
-                        var sIdx = parts[4] ? parseInt(parts[4]) : undefined;
+                        var sIdx = parts[4] ? parseInt(parts[4]) - 1 : undefined;
                         var table = data.objects.find(function(o){ return o.name === tName; });
                         if(table) guests.push({ unit: unit, name: name, count: cnt, tableId: table.id, seatIndex: isNaN(sIdx)?undefined:sIdx });
                     }
@@ -1576,7 +1576,7 @@ function exportCSVOnly() {
         const table = mapObjects.find(o => o.id === g.tableId);
         const tableName = table ? table.name : "Unknown";
         const escape = (txt) => `"${(txt||'').toString().replace(/"/g, '""')}"`;
-        const seatIdx = g.seatIndex !== undefined ? g.seatIndex : '';
+        const seatIdx = g.seatIndex !== undefined ? (g.seatIndex + 1) : '';
         csvContent += `${escape(tableName)},${escape(g.unit)},${escape(g.name)},${g.count},${seatIdx}\n`;
     });
 
