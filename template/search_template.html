@@ -68,9 +68,11 @@
             } else if (o.type === 'main-table') {
                 svg += `<g id="g-${o.id}" onclick="searchTable('${o.id}')"><circle cx="${cx}" cy="${cy}" r="${o.w / 2}" class="seat-circle main-table" id="s-${o.id}"/><text x="${cx}" y="${cy}" font-size="16" fill="#b91c1c">${o.name}</text></g>`
             } else if (o.type === 'stage') {
-                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="stage"/><text x="${cx}" y="${cy}" fill="white">${o.name}</text>`
+                const style = o.vertical ? 'style="writing-mode: vertical-rl"' : '';
+                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="stage"/><text x="${cx}" y="${cy}" fill="white" ${style}>${o.name}</text>`
             } else if (o.type === 'label') {
-                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="label-box"/><text x="${cx}" y="${cy}">${o.name}</text>`
+                const style = o.vertical ? 'style="writing-mode: vertical-rl"' : '';
+                svg += `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" rx="4" class="label-box"/><text x="${cx}" y="${cy}" ${style}>${o.name}</text>`
             }
         });
         svg += '</svg>';

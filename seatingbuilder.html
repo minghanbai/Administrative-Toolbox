@@ -69,6 +69,7 @@
                     <button onclick="exportExcel()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-excel w-4 text-center text-green-600"></i> 匯出 Excel</button>
                     <button onclick="exportCSVOnly()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-csv w-4 text-center text-green-600"></i> 匯出 CSV (更新用)</button>
                     <button onclick="exportPDF()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center gap-3 transition"><i class="fa-solid fa-file-pdf w-4 text-center text-red-600"></i> 匯出 PDF</button>
+                    <button onclick="exportSVG()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-3 transition"><i class="fa-solid fa-bezier-curve w-4 text-center text-orange-600"></i> 匯出 SVG (向量圖)</button>
                     <button onclick="exportWebPackage('single')" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-3 transition">
                         <i class="fa-solid fa-globe w-4 text-center text-indigo-600"></i> 打包網頁 (單檔)
                     </button>
@@ -106,7 +107,7 @@
                         <label class="flex items-center gap-1 cursor-pointer hover:text-blue-600"><input type="radio" name="inputMode" value="name" checked> 姓名</label>
                         <label class="flex items-center gap-1 cursor-pointer hover:text-blue-600"><input type="radio" name="inputMode" value="unit"> 單位</label>
                     </div>
-                    <textarea id="guestInput" rows="3" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="輸入名單... (支援: 財務部 5)"></textarea>
+                    <textarea id="guestInput" rows="6" class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y" placeholder="輸入範例：&#10;王小明&#10;財務部 5&#10;財務部 王小明&#10;財務部 黃小花 5" title="支援格式：&#10;1. 姓名 (依模式)&#10;2. 單位 (依模式)&#10;3. 單位 姓名&#10;4. 單位/姓名 人數&#10;5. 單位 姓名 人數&#10;6. 單位: 姓名, 姓名..."></textarea>
                     <button onclick="parseGuests()" class="w-full bg-gray-800 text-white text-sm py-1.5 rounded hover:bg-black transition">加入名單</button>
                     <div class="flex justify-between text-xs text-gray-500 pt-1">
                         <span>總計: <b id="totalCount">0</b></span>

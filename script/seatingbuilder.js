@@ -326,6 +326,9 @@ function loadFromLocal() {
                 appState.panX = data.appState.panX || 0;
                 appState.panY = data.appState.panY || 0;
                 
+                // 修正：在設定步驟前先還原 viewMode，避免座標換算錯誤導致物件內縮
+                if (data.appState.viewMode) appState.viewMode = data.appState.viewMode;
+                
                 // Restore Step based on saved viewMode or default to 2
                 let step = 2;
                 if (data.appState.currentStep && data.appState.currentStep <= 3) step = data.appState.currentStep;
@@ -364,7 +367,7 @@ function addMapObject(type, x, y, isBatch = false) {
         y = -appState.panY / appState.scale;
     }
     const id = genId();
-    let newObj = { id, type, x, y, width: 180, height: 180, name: '', capacity: 10 };
+    let newObj = { id, type, x, y, width: 180, height: 180, name: '', capacity: 10, vertical: false };
 
     if (SIZES[type]) {
         // Use size based on current mode
@@ -436,6 +439,16 @@ function deleteObject(id) {
     appState.selectedIds = [];
     updateSelectionVisuals();
     renderAll(); updateStats();
+}
+
+function toggleRotate(id) {
+    recordState();
+    const obj = mapObjects.find(o => o.id === id);
+    if(obj) {
+        obj.vertical = !obj.vertical;
+        const tmp = obj.width; obj.width = obj.height; obj.height = tmp;
+        renderAll(); saveToLocal();
+    }
 }
 
 // --- Rendering ---
@@ -573,6 +586,7 @@ function renderMap() {
         } else {
             // Stage / Label
             el.className += (obj.type === 'stage' ? ' obj-stage' : ' obj-label');
+            if (obj.vertical) el.style.writingMode = 'vertical-rl';
             el.innerHTML = `<span onclick="openModal('${obj.id}')" class="cursor-pointer hover:underline decoration-dashed">${obj.name}</span>`;
             if (!appState.locked) {
                 const del = document.createElement('div');
@@ -580,6 +594,12 @@ function renderMap() {
                 del.innerHTML = '×';
                 del.onclick = (e) => { e.stopPropagation(); deleteObject(obj.id); };
                 el.appendChild(del);
+
+                const rot = document.createElement('div');
+                rot.className = 'absolute -top-2 -left-2 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs cursor-pointer shadow hover:scale-110 pointer-events-auto';
+                rot.innerHTML = '<i class="fa-solid fa-rotate-right"></i>';
+                rot.onclick = (e) => { e.stopPropagation(); toggleRotate(obj.id); };
+                el.appendChild(rot);
             }
         }
         container.appendChild(el);
@@ -733,23 +753,35 @@ function parseGuests() {
     const lines = input.split('\n');
     
     lines.forEach(line => {
-        line = line.trim().replace(/：/g, ':').replace(/，/g, ',');
+        // 統一全形符號與空白
+        line = line.trim().replace(/：/g, ':').replace(/，/g, ',').replace(/　/g, ' ');
         if(!line) return;
+
+        // 模式 1: "單位: 姓名1, 姓名2..." (批次名單)
         if (line.includes(':')) {
             const [unit, names] = line.split(':');
             names.split(/,| /).forEach(n => { if(n.trim()) addGuest(unit.trim(), n.trim()); });
-        } else if (line.match(/^(.+?)\s+(\d+)$/)) {
-            const match = line.match(/^(.+?)\s+(\d+)$/);
-            const label = match[1];
-            const num = parseInt(match[2]);
-            if (mode === 'unit') addGuest(label, "保留席", num);
-            else addGuest(defUnit, label, num);
-        } else {
-            const parts = line.split(/\s+/);
-            if (parts.length >= 2) addGuest(parts[0], parts.slice(1).join(' '));
-            else if (parts.length === 1) {
-                if (mode === 'unit') addGuest(parts[0], "保留席");
-                else addGuest(defUnit, parts[0]);
+            return;
+        }
+
+        // 分割欄位 (以空白分隔)
+        const parts = line.split(/\s+/);
+        let count = 1;
+
+        // 檢查最後一欄是否為數字 (人數)
+        if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) {
+            count = parseInt(parts.pop()); // 取出並移除最後一個數字
+        }
+
+        if (parts.length >= 2) {
+            // 剩餘兩欄以上：視為 "單位 姓名"
+            addGuest(parts[0], parts.slice(1).join(' '), count);
+        } else if (parts.length === 1) {
+            // 剩餘一欄：依據輸入模式決定是 "單位" 還是 "姓名"
+            if (mode === 'unit') {
+                addGuest(parts[0], "保留席", count); // 模式為單位 -> 姓名預設為保留席
+            } else {
+                addGuest(defUnit, parts[0], count);  // 模式為姓名 -> 單位預設為貴賓
             }
         }
     });
@@ -1218,23 +1250,116 @@ function exportExcel() {
     XLSX.writeFile(wb, "活動名單.xlsx");
 }
 
+// --- Export SVG (Vector) ---
+function exportSVG() {
+    if(mapObjects.length === 0) return alert('無物件');
+    
+    const xs = mapObjects.map(o => o.x); const ys = mapObjects.map(o => o.y);
+    const padding = appState.viewMode === 'seating' ? 60 : 10;
+    const minX = Math.min(...xs) - padding; const minY = Math.min(...ys) - padding;
+    const maxX = Math.max(...xs.map((x, i) => x + mapObjects[i].width)) + padding;
+    const maxY = Math.max(...ys.map((y, i) => y + mapObjects[i].height)) + padding;
+    const w = maxX - minX; const h = maxY - minY;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${minX} ${minY} ${w} ${h}">`;
+    svg += `<style>.txt { font-family: sans-serif; font-size: 12px; text-anchor: middle; dominant-baseline: middle; } .seat-txt { font-size: 9px; fill: #999; }</style>`;
+
+    mapObjects.forEach(o => {
+        const cx = o.x + o.width/2; const cy = o.y + o.height/2;
+        if (o.type === 'stage') {
+            const style = o.vertical ? 'style="writing-mode: vertical-rl;"' : '';
+            svg += `<rect x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" fill="#e0f2fe" stroke="#3b82f6" /><text x="${cx}" y="${cy}" class="txt" fill="#1e40af" ${style}>${o.name}</text>`;
+        } else if (o.type === 'label') {
+            const style = o.vertical ? 'style="writing-mode: vertical-rl;"' : '';
+            svg += `<rect x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="4" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1" />`;
+            svg += `<text x="${cx}" y="${cy}" class="txt" font-size="16" fill="#333" ${style}>${o.name}</text>`;
+        } else {
+            const isMain = o.type === 'main-table';
+            const stroke = isMain ? '#ef4444' : '#9ca3af';
+            const fill = isMain ? '#fef2f2' : '#ffffff';
+            const txtFill = isMain ? '#991b1b' : '#374151';
+
+            if (appState.viewMode === 'assign') {
+                // 1. 卡片背景
+                svg += `<rect x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+                
+                // 2. 標題分隔線
+                const headerH = 32;
+                const lineStroke = isMain ? '#fecaca' : '#e5e7eb'; // 紅色淡線或灰色淡線
+                svg += `<line x1="${o.x}" y1="${o.y+headerH}" x2="${o.x+o.width}" y2="${o.y+headerH}" stroke="${lineStroke}" stroke-width="1" />`;
+                
+                // 3. 桌號標題
+                svg += `<text x="${cx}" y="${o.y + 20}" class="txt" font-weight="bold" font-size="14" fill="${txtFill}">${o.name}</text>`;
+
+                // 4. 賓客名單 (雙欄排列)
+                const tableGuests = guests.filter(g => g.tableId === o.id);
+                const colW = o.width / 2;
+                const startY = o.y + headerH + 16; // 標題下方起始位置
+                const rowH = 18; // 行高
+
+                tableGuests.forEach((g, i) => {
+                    const col = i % 2; // 0:左欄, 1:右欄
+                    const row = Math.floor(i / 2);
+                    const gx = o.x + (col * colW) + (colW / 2); // 欄位中心 X
+                    const gy = startY + (row * rowH); // 文字 Y
+                    
+                    // 簡單的邊界檢查，避免超出框框
+                    if (gy < o.y + o.height - 5) {
+                        const gName = g.name + (g.count > 1 ? ` x${g.count}` : '');
+                        svg += `<text x="${gx}" y="${gy}" class="txt" font-size="11" fill="#374151">${gName}</text>`;
+                    }
+                });
+            } else {
+                svg += `<circle cx="${cx}" cy="${cy}" r="${o.width/2}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+                svg += `<text x="${cx}" y="${cy}" class="txt" font-weight="bold" fill="${txtFill}">${o.name}</text>`;
+                if (appState.viewMode === 'seating') {
+                    const r = o.width / 2; const seatR = 20; const orbitR = r + 25; const cap = o.capacity || 10;
+                    for(let i=0; i<cap; i++) {
+                        const angle = (i * (360/cap)) - 90; const rad = angle * Math.PI / 180;
+                        const sx = cx + orbitR * Math.cos(rad); const sy = cy + orbitR * Math.sin(rad);
+                        const g = guests.find(g => g.tableId === o.id && g.seatIndex === i);
+                        const sFill = g ? '#dbeafe' : 'white'; const sStroke = g ? '#3b82f6' : '#ccc';
+                        const sTxt = g ? g.name.substr(0,3) : (i+1);
+                        svg += `<circle cx="${sx}" cy="${sy}" r="${seatR}" fill="${sFill}" stroke="${sStroke}" />`;
+                        svg += `<text x="${sx}" y="${sy}" class="txt seat-txt" fill="${g?'#1e40af':'#ccc'}">${sTxt}</text>`;
+                    }
+                }
+            }
+        }
+    });
+    svg += `</svg>`;
+    
+    const blob = new Blob([svg], {type: 'image/svg+xml'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `layout_${new Date().toISOString().split('T')[0]}.svg`;
+    a.click(); URL.revokeObjectURL(url);
+}
+
 // --- Export PDF (Vector via System Print) ---
 function exportPDF() {
-    if (appState.viewMode !== 'assign') {
-        alert('請先切換至「排位模式 (大)」再進行 PDF 輸出，以確保版面與內容正確。');
-        return;
-    }
+    // 1. Setup Print Styles (Hide body, show print container, set landscape)
+    const style = document.createElement('style');
+    style.innerHTML = `
+        @media print {
+            body > * { display: none !important; }
+            #print-container { display: block !important; }
+            @page { size: landscape; margin: 0; }
+        }
+    `;
+    document.head.appendChild(style);
     
-    // 1. Create Print Container
+    // 2. Create Print Container
     const container = document.createElement('div');
     container.id = 'print-container';
-    container.style.display = 'none';
+    container.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:white; z-index:9999; overflow:hidden;';
     
     const content = document.createElement('div');
-    content.id = 'print-content';
+    content.style.cssText = 'position:absolute; top:50%; left:50%; transform-origin: center center;';
     container.appendChild(content);
 
-    // 2. Calculate Bounds to determine relative positioning
+    // 3. Calculate Bounds
+    if (mapObjects.length === 0) { alert('無物件'); return; }
     const xs = mapObjects.map(o => o.x);
     const ys = mapObjects.map(o => o.y);
     const minX = Math.min(...xs);
@@ -1242,75 +1367,82 @@ function exportPDF() {
     const maxX = Math.max(...xs.map((x, i) => x + mapObjects[i].width));
     const maxY = Math.max(...ys.map((y, i) => y + mapObjects[i].height));
     
-    const padding = 50;
-    const width = maxX - minX + padding * 2;
-    const height = maxY - minY + padding * 2;
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
+    const padding = 40;
     
-    content.style.width = width + 'px';
-    content.style.height = height + 'px';
+    content.style.width = contentW + 'px';
+    content.style.height = contentH + 'px';
     
-    // Calculate Scale to fit A4 Landscape (approx 1123x794px at 96dpi)
-    // Use a slightly smaller area to ensure margins
-    const A4_WIDTH = 1080; 
-    const A4_HEIGHT = 750;
-    
-    const scaleX = A4_WIDTH / width;
-    const scaleY = A4_HEIGHT / height;
-    const scale = Math.min(scaleX, scaleY); 
-    
+    // 4. Calculate Scale to fit A4 Landscape (approx 1100x780 safe area)
+    const pageW = 1100; 
+    const pageH = 780;
+    const scale = Math.min((pageW - padding*2) / contentW, (pageH - padding*2) / contentH);
     content.style.transform = `translate(-50%, -50%) scale(${scale})`;
 
     mapObjects.forEach(obj => {
         const el = document.createElement('div');
         el.style.position = 'absolute';
-        el.style.left = (obj.x - minX + padding) + 'px';
-        el.style.top = (obj.y - minY + padding) + 'px';
+        el.style.left = (obj.x - minX) + 'px';
+        el.style.top = (obj.y - minY) + 'px';
         el.style.width = obj.width + 'px';
+        el.style.height = obj.height + 'px';
         
-        if (obj.type === 'table' || obj.type === 'main-table') {
-            el.style.height = 'auto'; // Auto height to fit all guests
-            el.style.minHeight = obj.height + 'px';
-            el.className = obj.type === 'main-table' 
-                ? 'bg-red-50 border-2 border-red-500 rounded-xl shadow-sm flex flex-col overflow-hidden text-red-800 print-color-adjust'
-                : 'bg-white border-2 border-gray-300 rounded-xl shadow-sm flex flex-col overflow-hidden print-color-adjust';
+        // Render based on current View Mode
+        if (appState.viewMode === 'assign' && (obj.type === 'table' || obj.type === 'main-table')) {
+            // Assign Mode: Cards
+            el.style.height = 'auto'; el.style.minHeight = obj.height + 'px';
+            el.className = obj.type === 'main-table' ? 'bg-red-50 border-2 border-red-500 rounded-xl shadow-sm flex flex-col overflow-hidden text-red-800 text-xs' : 'bg-white border-2 border-gray-300 rounded-xl shadow-sm flex flex-col overflow-hidden text-xs';
 
-            const seatedCount = guests.filter(g => g.tableId === obj.id).reduce((acc,g) => acc + (g.count||1), 0);
-            
-            // Header
             const header = document.createElement('div');
-            header.className = obj.type === 'main-table' ? 'p-2 text-center font-bold text-lg border-b border-red-200' : 'p-2 bg-gray-100 border-b border-gray-200 flex justify-between items-center';
-            header.innerHTML = obj.type === 'main-table' ? obj.name : `<span class="font-bold text-gray-700">${obj.name}</span><span class="bg-blue-100 text-blue-800 text-xs px-2 rounded-full print-color-adjust">${seatedCount}</span>`;
+            header.className = obj.type === 'main-table' ? 'p-1 text-center font-bold border-b border-red-200 bg-red-100' : 'p-1 bg-gray-100 border-b border-gray-200 flex justify-between items-center font-bold px-2';
+            header.innerText = obj.name;
             el.appendChild(header);
 
-            // Guest List with Multi-column
             const list = document.createElement('div');
-            list.className = 'p-2 text-xs';
-            list.style.columnCount = 2; // Force 2 columns
-            list.style.columnGap = '0.5rem';
-            
+            list.className = 'p-1 grid grid-cols-2 gap-1 content-start';
             guests.filter(g => g.tableId === obj.id).forEach(g => {
                 const item = document.createElement('div');
-                item.className = 'mb-1 break-inside-avoid flex items-center'; // Prevent split
-                item.innerHTML = `<span class="text-gray-500 mr-1 scale-90 origin-left">${g.unit}</span><span class="font-bold">${g.name}</span>${g.count > 1 ? `<span class="ml-1 text-red-500">x${g.count}</span>` : ''}`;
+                item.innerText = g.name + (g.count > 1 ? ` x${g.count}` : '');
                 list.appendChild(item);
             });
             el.appendChild(list);
+
+        } else if (appState.viewMode === 'seating' && (obj.type === 'table' || obj.type === 'main-table')) {
+            // Seating Mode: Circles + Seats
+            el.className = obj.type === 'main-table' ? 'rounded-full border-2 border-red-500 flex items-center justify-center font-bold text-red-800 bg-red-50' : 'rounded-full border-2 border-gray-400 flex items-center justify-center font-bold text-gray-700 bg-white';
+            el.style.borderRadius = '50%'; // 修正：強制圓角，避免列印時背景變成矩形
+            el.innerText = obj.name;
+            
+            const r = obj.width / 2; const seatR = 20; const orbitR = r + 25; const cap = obj.capacity || 10;
+            for(let i=0; i<cap; i++) {
+                const angle = (i * (360/cap)) - 90; const rad = angle * Math.PI / 180;
+                const sx = r + orbitR * Math.cos(rad) - seatR; const sy = r + orbitR * Math.sin(rad) - seatR;
+                const seat = document.createElement('div');
+                seat.style.cssText = `position:absolute; left:${sx}px; top:${sy}px; width:${seatR*2}px; height:${seatR*2}px;`;
+                seat.className = 'rounded-full border border-gray-300 bg-white flex items-center justify-center text-[10px]';
+                const g = guests.find(g => g.tableId === obj.id && g.seatIndex === i);
+                if(g) { seat.innerText = g.name.substr(0,3); seat.className += ' bg-blue-100 text-blue-800 font-bold border-blue-300'; }
+                else { seat.innerText = i+1; seat.className += ' text-gray-300'; }
+                el.appendChild(seat);
+            }
+
         } else {
-            el.style.height = obj.height + 'px';
-            el.className = obj.type === 'stage' ? 'bg-blue-500 text-white flex items-center justify-center font-bold rounded shadow opacity-90 print-color-adjust' : 'bg-gray-200 border border-gray-400 text-gray-600 flex items-center justify-center font-bold rounded-full print-color-adjust';
+            // Layout Mode / Stage / Label
+            el.className = 'flex items-center justify-center font-bold text-center border rounded';
+            if(obj.vertical) el.style.writingMode = 'vertical-rl';
+            if(obj.type === 'stage') el.className += ' bg-blue-200 border-blue-400 text-blue-800';
+            else if(obj.type === 'label') el.className += ' bg-transparent border-none text-gray-600 text-xl';
+            else { el.className += ' rounded-full bg-white border-gray-400 text-gray-700 text-xs'; if(obj.type==='main-table') el.className += ' border-red-400 text-red-800 bg-red-50'; }
             el.innerText = obj.name;
         }
         content.appendChild(el);
     });
 
     document.body.appendChild(container);
-
-    // 3. Trigger Print
-    // The browser's print dialog will open. User can choose "Save as PDF".
     window.print();
-
-    // 4. Cleanup
     document.body.removeChild(container);
+    document.head.removeChild(style);
 }
 
 // --- Export Web Package (Small Circle Mode Forced) ---
@@ -1334,7 +1466,8 @@ async function exportWebPackage(mode = 'single') {
             w: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.width),
             h: (o.type==='table') ? 80 : (o.type==='main-table' ? 120 : o.height),
             capacity: o.capacity,
-            name: o.name
+            name: o.name,
+            vertical: o.vertical
         })),
         guests: guests.filter(g => g.tableId).map(g => ({ unit: g.unit, name: g.name, count: g.count, tableId: g.tableId, seatIndex: g.seatIndex }))
     };
